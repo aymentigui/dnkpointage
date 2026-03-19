@@ -1,0 +1,319 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+  // directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model user {
+  id                               String                     @id @default(cuid())
+  firstname                        String?
+  lastname                         String?
+  username                         String?                    @unique
+  email                            String?                    @unique
+  email_verified                   DateTime?
+  password                         String?
+  image                            String?
+  image_compressed                 String?
+  is_two_factor_enabled            Boolean?                   @default(false)
+  two_factor_confermation_code     twofactorconfermation?
+  reset_password_confermation_code resetpasswordconfermation?
+  // accounts                      Account[]
+  sessions                         session[]
+  roles                            userrole[]
+  is_admin                         Boolean                    @default(false)
+  public                           Boolean                    @default(true)
+  failed_login_attempts            Int                        @default(0)
+  locked_until                     DateTime?
+  verification_attempts            Int                        @default(0)
+  last_verification_attempt        DateTime?
+  verification_blocked_until       DateTime?
+  two_factor_attempts              Int                        @default(0)
+  last_two_factor_attempt          DateTime?
+  two_factor_blocked_until         DateTime?
+  // Optional for WebAuthn support
+  // Authenticator                 Authenticator[]
+
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+  updated_at DateTime  @updatedAt
+  Account    account[]
+}
+
+model session {
+  id            String   @id @default(cuid())
+  session_token String
+  user_id       String
+  expires       DateTime
+  user          user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device_name   String?
+  device_type   String?
+  browser       String?
+  os            String?
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+}
+
+model role {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  permissions String
+  users       userrole[]
+  public      Boolean    @default(true)
+}
+
+model userrole {
+  id      String @id @default(cuid())
+  user    user   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user_id String
+  role    role   @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  role_id String
+}
+
+model verificationtoken {
+  id         String   @id @default(cuid())
+  email      String
+  token      String
+  expired_at DateTime
+}
+
+model twofactorconfermation {
+  id         String   @id @default(cuid())
+  user_id    String
+  expired_at DateTime
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id])
+}
+
+model resetpasswordconfermation {
+  id            String    @id @default(cuid())
+  user_id       String
+  expired_at    DateTime
+  attempts      Int       @default(0) // Nombre de tentatives
+  last_attempt  DateTime  @default(now()) // Dernière tentative
+  blocked_until DateTime? // Bloqué jusqu'à cette date
+  user          user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id])
+}
+
+model account {
+  id                       String  @id @default(cuid())
+  user_id                  String
+  type                     String
+  provider                 String
+  provider_account_id      String
+  refresh_token            String? @db.Text
+  access_token             String? @db.Text
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String? @db.Text
+  session_state            String?
+  refresh_token_expires_in Int?
+  user                     user    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([provider, provider_account_id])
+  @@index([user_id])
+}
+
+model files {
+  id         String    @id @default(cuid())
+  name       String
+  mime_type  String
+  extention  String
+  size       Int
+  path       String
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+  added_from String?
+
+  can_view_permissions     String?
+  can_download_permissions String?
+  can_delete_permissions   String?
+
+  // Définition des permissions spécifiques aux utilisateurs
+  can_view_users     String?
+  can_download_users String?
+  can_delete_users   String?
+
+  // Indicateur si seul l'admin a le contrôle total
+  admin_view_only     Boolean @default(false)
+  admin_download_only Boolean @default(false)
+  admin_delete_only   Boolean @default(false)
+}
+
+model employee {
+  id           String     @id @default(cuid())
+  matricule    String
+  nom          String?
+  prenom       String?
+  poste        String?
+  zone         String?
+  workspace_id String?
+  workspace    workspace? @relation(fields: [workspace_id], references: [id])
+
+  // Relations
+  pointages   pointage[]
+  plannings   planning[]
+  annotations annotation[]
+  cycles      cycle? // Relation 1-1 avec le cycle de travail
+
+  // Métadonnées
+  created_at             DateTime               @default(now())
+  updated_at             DateTime               @updatedAt
+  modification_histories modification_history[]
+
+  @@index([matricule])
+  @@map("employees")
+}
+
+// Pointages bruts importés d'Excel
+model pointage {
+  id          String   @id @default(cuid())
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  date         DateTime // Format YYYY-MM-DD
+  heure_entree String? // Format HH:MM
+  heure_sortie String? // Format HH:MM
+
+  // Détection automatique
+  est_nuit Boolean @default(false) // Si heure sortie < heure entrée
+
+  created_at DateTime @default(now())
+  created_by String?
+
+  @@unique([employee_id, date])
+  @@index([date])
+  @@map("pointages")
+}
+
+// Planning (statuts calculés/définis)
+model planning {
+  id          String   @id @default(cuid())
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  date   DateTime // Format YYYY-MM-DD
+  statut String // 'P', 'A', 'R' (Présent, Absent, Repos)
+
+  // Référence à l'annotation si elle existe
+  annotation_id String?     @unique
+  annotation    annotation? @relation(fields: [annotation_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  created_by String?
+
+  @@unique([employee_id, date])
+  @@index([date])
+  @@map("planning")
+}
+
+// Annotations détaillées
+model annotation {
+  id      String @id @default(cuid())
+  code    String // 'M', 'J', 'Md', 'Rc', 'C', 'Ce'
+  libelle String // Mission, Justifié, Maladie, etc.
+
+  // Relations
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  date     DateTime
+  planning planning? // Relation inverse avec Planning
+
+  // Métadonnées
+  description String? // Description optionnelle
+  created_at  DateTime @default(now())
+  created_by  String?
+  updated_at  DateTime @updatedAt
+
+  @@unique([employee_id, date])
+  @@index([code])
+  @@map("annotations")
+}
+
+// Cycles de travail
+model cycle {
+  id          String   @id @default(cuid())
+  employee_id String   @unique
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  type String // 'weekly', 'rotation', 'night', 'unknown'
+
+  // Pour cycle hebdomadaire
+  rest_days String? // JSON: [0,1,2,3,4,5,6] (jours de repos)
+
+  // Pour cycles rotation/nuit
+  travail     Int? // Jours de travail
+  repos       Int? // Jours de repos
+  start_phase Int? @default(0)
+
+  // Métriques de confiance
+  fiabilite  Float? // accuracy ou score
+  est_manuel Boolean @default(false) // true si modifié manuellement
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  created_by String?
+
+  @@map("cycles")
+}
+
+// Workspaces (pour support multi-projets)
+model workspace {
+  id  String @id @default(cuid())
+  nom String
+
+  // Statistiques
+  emp_count  Int @default(0)
+  days_count Int @default(0)
+
+  // Métadonnées
+  saved_at   DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  // Relations
+  employees employee[]
+
+  @@map("workspaces")
+}
+
+// Historique des modifications
+model modification_history {
+  id String @id @default(cuid())
+
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  date              DateTime
+  ancien_statut     String?
+  nouveau_statut    String?
+  type_modification String // 'base', 'annotation', 'cycle'
+
+  description String?
+  user_id     String? // Pour traçabilité utilisateur
+
+  created_by String? // Pour traçabilité utilisateur
+  created_at DateTime @default(now())
+
+  @@index([employee_id])
+  @@index([date])
+  @@map("modification_history")
+}
