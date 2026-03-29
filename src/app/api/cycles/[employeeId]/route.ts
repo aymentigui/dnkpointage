@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { verifySession } from "@/actions/permissions";
 
 // PUT /api/cycles/[employeeId] - Mettre à jour le cycle (manuel)
 export async function PUT(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const paramsId = await params;
     const { employeeId } = paramsId;
     const body = await request.json();

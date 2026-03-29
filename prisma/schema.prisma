@@ -194,8 +194,9 @@ model pointage {
   // Détection automatique
   est_nuit Boolean @default(false) // Si heure sortie < heure entrée
 
-  created_at DateTime @default(now())
-  created_by String?
+  type_creation String   @default("excel_import")
+  created_at    DateTime @default(now())
+  created_by    String?
 
   @@unique([employee_id, date])
   @@index([date])

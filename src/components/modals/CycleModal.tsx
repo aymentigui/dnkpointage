@@ -2,11 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogFooter,
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,16 +15,16 @@ import { toast } from 'react-hot-toast'
 interface CycleModalProps {
     open: boolean
     onOpenChange: (open: boolean) => void
-    employeeId: string
+    employeeIds: string[] // ← On accepte maintenant un tableau d'IDs
     employeeMatricule: string
     currentCycle?: any
-    onSuccess: (newCycle?: any) => void  // ← accepte le nouveau cycle
+    onSuccess: (newCycle?: any) => void
 }
 
 export function CycleModal({
     open,
     onOpenChange,
-    employeeId,
+    employeeIds,
     employeeMatricule,
     currentCycle,
     onSuccess
@@ -40,7 +36,6 @@ export function CycleModal({
     const [startPhase, setStartPhase] = useState<number>(0)
     const [loading, setLoading] = useState(false)
 
-    // FIX 1 + 2: Sync state à chaque ouverture du modal
     useEffect(() => {
         if (!open) return
 
@@ -50,7 +45,6 @@ export function CycleModal({
             setRepos(currentCycle.repos || 2)
             setStartPhase(currentCycle.start_phase ?? 0)
 
-            // FIX 1: supporter rest_days ET restDays (BDD snake_case)
             const rawRestDays = currentCycle.rest_days ?? currentCycle.restDays ?? '[]'
             try {
                 let parsedRestDays = JSON.parse(rawRestDays)
@@ -62,7 +56,6 @@ export function CycleModal({
                 setRestDays([])
             }
         } else {
-            // Reset complet si pas de cycle existant
             setType('weekly')
             setRestDays([])
             setTravail(2)
@@ -72,24 +65,18 @@ export function CycleModal({
     }, [open, currentCycle])
 
     const days = [
-        { id: 0, label: 'Dimanche' },
-        { id: 1, label: 'Lundi' },
-        { id: 2, label: 'Mardi' },
-        { id: 3, label: 'Mercredi' },
-        { id: 4, label: 'Jeudi' },
-        { id: 5, label: 'Vendredi' },
+        { id: 0, label: 'Dimanche' }, { id: 1, label: 'Lundi' },
+        { id: 2, label: 'Mardi' }, { id: 3, label: 'Mercredi' },
+        { id: 4, label: 'Jeudi' }, { id: 5, label: 'Vendredi' },
         { id: 6, label: 'Samedi' },
     ]
 
     const handleToggleDay = (dayId: number) => {
         setRestDays(prev =>
-            prev.includes(dayId)
-                ? prev.filter(d => d !== dayId)
-                : [...prev, dayId]
+            prev.includes(dayId) ? prev.filter(d => d !== dayId) : [...prev, dayId]
         )
     }
 
-    // Validation avant sauvegarde
     const isValid = (): boolean => {
         if (type === 'weekly') return restDays.length >= 1
         if (type === 'rotation' || type === 'night') {
@@ -104,12 +91,15 @@ export function CycleModal({
             else toast.error('Jours de travail et repos doivent être entre 1 et 30')
             return
         }
+
+        if (employeeIds.length === 0) {
+            toast.error('Aucun employé sélectionné')
+            return
+        }
+
         setLoading(true)
         try {
-            const cycleData: any = {
-                type,
-                est_manuel: true,
-            }
+            const cycleData: any = { type, est_manuel: true }
             if (type === 'weekly') {
                 cycleData.rest_days = JSON.stringify(restDays)
             } else {
@@ -118,13 +108,14 @@ export function CycleModal({
                 cycleData.start_phase = startPhase
             }
 
-            await cyclesApi.update(employeeId, cycleData)
+            // Exécuter l'API pour tous les employés sélectionnés en parallèle
+            await Promise.all(
+                employeeIds.map(id => cyclesApi.update(id, cycleData))
+            )
 
-            // Fermer le modal + toast AVANT onSuccess
-            // onSuccess ne doit plus déclencher de reload complet
-            toast.success('Cycle modifié avec succès')
+            toast.success(employeeIds.length > 1 ? `${employeeIds.length} cycles modifiés avec succès` : 'Cycle modifié avec succès')
             onOpenChange(false)
-            onSuccess(cycleData) // ← passer le nouveau cycle
+            onSuccess(cycleData)
         } catch {
             toast.error('Erreur lors de la modification')
         } finally {
@@ -166,16 +157,13 @@ export function CycleModal({
                         </div>
                     </TabsContent>
 
-                    {/* Rotation et Night partagent la même logique */}
                     {(['rotation', 'night'] as const).map((tabType) => (
                         <TabsContent key={tabType} value={tabType} className="space-y-4 py-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label>Jours de travail</Label>
                                     <Input
-                                        type="number"
-                                        min={1}
-                                        max={30}
+                                        type="number" min={1} max={30}
                                         value={travail}
                                         onChange={(e) => setTravail(parseInt(e.target.value) || 1)}
                                         className="mt-2"
@@ -184,9 +172,7 @@ export function CycleModal({
                                 <div>
                                     <Label>Jours de repos</Label>
                                     <Input
-                                        type="number"
-                                        min={1}
-                                        max={30}
+                                        type="number" min={1} max={30}
                                         value={repos}
                                         onChange={(e) => setRepos(parseInt(e.target.value) || 1)}
                                         className="mt-2"
@@ -194,7 +180,6 @@ export function CycleModal({
                                 </div>
                             </div>
 
-                            {/* FIX 3: Afficher et permettre de modifier la phase */}
                             <div>
                                 <Label>
                                     Phase de départ
@@ -203,9 +188,7 @@ export function CycleModal({
                                     </span>
                                 </Label>
                                 <Input
-                                    type="number"
-                                    min={0}
-                                    max={travail + repos - 1}
+                                    type="number" min={0} max={travail + repos - 1}
                                     value={startPhase}
                                     onChange={(e) => setStartPhase(parseInt(e.target.value) || 0)}
                                     className="mt-2"
@@ -222,9 +205,7 @@ export function CycleModal({
                 </Tabs>
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>
-                        Annuler
-                    </Button>
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
                     <Button onClick={handleSave} disabled={loading || !isValid()}>
                         {loading ? 'Enregistrement...' : 'Enregistrer'}
                     </Button>

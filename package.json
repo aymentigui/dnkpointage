@@ -70,9 +70,6 @@
     "nodemailer": "^7.0.11",
     "papaparse": "^5.5.2",
     "pdfjs-dist": "^4.10.38",
-    "quill": "^2.0.3",
-    "quill-table": "^1.0.0",
-    "quill-table-widget": "^1.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.5",
@@ -83,12 +80,16 @@
     "sharp": "^0.33.5",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tar": "^7.5.12",
     "tinymce": "^7.6.1",
     "ua-parser-js": "^2.0.0",
     "uuid": "^11.0.5",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/xlsx-0.20.1.tgz",
     "zod": "^3.24.1",
     "zustand": "^5.0.3"
+  },
+  "overrides": {
+    "tar": "$tar"
   },
   "devDependencies": {
     "@types/node": "^20",

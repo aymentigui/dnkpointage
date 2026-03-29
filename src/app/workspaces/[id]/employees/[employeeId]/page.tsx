@@ -917,7 +917,7 @@ export default function EmployeeDetailPage() {
                     <CycleModal
                         open={cycleModalOpen}
                         onOpenChange={setCycleModalOpen}
-                        employeeId={details.id}
+                        employeeIds={[details.id]}
                         employeeMatricule={details.matricule}
                         currentCycle={details.cycle}
                         onSuccess={() => {
@@ -938,11 +938,11 @@ export default function EmployeeDetailPage() {
                         ))}
                     </div>
                 ) : stats ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <StatCard icon={CheckCircle2} label="Présences" value={stats.presents} sub={`sur ${stats.total_jours} jours`} accent="bg-emerald-500" />
-                        <StatCard icon={TrendingUp} label="Taux présence" value={`${stats.taux_presence}%`} sub="de jours ouvrés" accent="bg-blue-500" />
-                        <StatCard icon={Clock} label="Heures totales" value={stats.total_heures} sub={`moy. ${stats.moyenne_heures_jour}h/j`} accent="bg-violet-500" />
-                        <StatCard icon={XCircle} label="Absences" value={stats.absents} sub={`${stats.repos} jours de repos`} accent="bg-rose-500" />
+                        {/* <StatCard icon={TrendingUp} label="Taux présence" value={`${stats.taux_presence}%`} sub="de jours ouvrés" accent="bg-blue-500" />
+                        <StatCard icon={Clock} label="Heures totales" value={stats.total_heures} sub={`moy. ${stats.moyenne_heures_jour}h/j`} accent="bg-violet-500" /> */}
+                        {/* <StatCard icon={XCircle} label="Absences" value={stats.absents} sub={`${stats.repos} jours de repos`} accent="bg-rose-500" /> */}
                     </div>
                 ) : null}
 

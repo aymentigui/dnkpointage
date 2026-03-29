@@ -11,6 +11,13 @@ interface Params {
 // GET /api/workspaces/[id] - Détail d'un workspace
 export async function GET(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const paramsId = await params;
     const { id } = paramsId;
 
@@ -37,6 +44,13 @@ export async function GET(request: NextRequest, { params }: any) {
 // PUT /api/workspaces/[id] - Modifier un workspace
 export async function PUT(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const paramsId = await params;
     const { id } = paramsId;
     const body = await request.json();

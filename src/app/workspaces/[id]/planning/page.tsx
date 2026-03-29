@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 import {
     ArrowLeft, Calendar, Filter, Download,
     Search, X, ChevronDown, ChevronUp,
+    Trash,
+    Trash2,
 } from 'lucide-react'
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -71,15 +73,21 @@ export default function PlanningPage() {
     const [planningData, setPlanningData] = useState<Record<string, any>>({})
     const [dates, setDates] = useState<string[]>([])
 
-    const [dateDebut, setDateDebut] = useState(() => {
+    // États pour les dates (valeurs temporaires dans l'input)
+    const [tempDateDebut, setTempDateDebut] = useState(() => {
         const now = new Date()
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
     })
-    const [dateFin, setDateFin] = useState(() => {
+    const [tempDateFin, setTempDateFin] = useState(() => {
         const now = new Date()
         const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
         return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`
     })
+
+    // États pour les dates effectivement utilisées dans la requête
+    const [dateDebut, setDateDebut] = useState(tempDateDebut)
+    const [dateFin, setDateFin] = useState(tempDateFin)
+
     const [selectedMat, setSelectedMat] = useState<string | null>(selectedMatricule)
 
     // ── Filtres ───────────────────────────────────────────────
@@ -88,15 +96,21 @@ export default function PlanningPage() {
     const [zoneSearch, setZoneSearch] = useState('')
     const [zoneExact, setZoneExact] = useState(false) // checkbox mode exact
     const [presenceFilter, setPresenceFilter] = useState<'all' | 'has' | 'none'>('all')
+    const [cycleFilter, setCycleFilter] = useState<'all' | 'with_cycle' | 'without_cycle'>('all') // NOUVEAU FILTRE
     const [filtersExpanded, setFiltersExpanded] = useState(true)
 
     // ── Load ──────────────────────────────────────────────────
-    useEffect(() => { loadData() }, [workspaceId, dateDebut, dateFin])
+    // Le chargement ne se fait que quand dateDebut/dateFin changent (via la recherche)
+    useEffect(() => {
+        if (dateDebut && dateFin) {
+            loadData()
+        }
+    }, [workspaceId, dateDebut, dateFin])
 
     const loadData = async () => {
         try {
             setLoading(true)
-            const empRes = await employeesApi.getAll({ workspaceId })
+            const empRes = await employeesApi.getAll({ workspace_id: workspaceId })
             const employeesData = empRes.data.data || []
             setAllEmployees(employeesData)
 
@@ -127,6 +141,24 @@ export default function PlanningPage() {
         } finally {
             setLoading(false)
         }
+    }
+
+    // ── Gestionnaire de recherche par période ──────────────────
+    const handlePeriodSearch = () => {
+        setDateDebut(tempDateDebut)
+        setDateFin(tempDateFin)
+    }
+
+    // ── Gestionnaire de réinitialisation des dates ────────────
+    const handleResetDates = () => {
+        const now = new Date()
+        const firstDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+        const lastDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`
+
+        setTempDateDebut(firstDay)
+        setTempDateFin(lastDay)
+        setDateDebut(firstDay)
+        setDateFin(lastDay)
     }
 
     // ── Filtrage ──────────────────────────────────────────────
@@ -166,9 +198,15 @@ export default function PlanningPage() {
                 if (presenceFilter === 'none' && nbPresents > 0) return false
             }
 
+            // ── NOUVEAU : Filtre cycle ─────────────────────────────────
+            if (cycleFilter !== 'all') {
+                if (cycleFilter === 'with_cycle' && (!emp.cycles || emp.cycles.type === "unknown")) return false
+                if (cycleFilter === 'without_cycle' && (emp.cycles && emp.cycles.type !== "unknown")) return false
+            }
+
             return true
         })
-    }, [allEmployees, planningData, searchText, posteSearch, zoneSearch, zoneExact, presenceFilter])
+    }, [allEmployees, planningData, searchText, posteSearch, zoneSearch, zoneExact, presenceFilter, cycleFilter])
 
     // ── Clear filtres ─────────────────────────────────────────
     const clearFilters = () => {
@@ -177,10 +215,11 @@ export default function PlanningPage() {
         setZoneSearch('')
         setZoneExact(false)
         setPresenceFilter('all')
+        setCycleFilter('all')
     }
 
     const hasActiveFilters =
-        searchText || posteSearch || zoneSearch || presenceFilter !== 'all'
+        searchText || posteSearch || zoneSearch || presenceFilter !== 'all' || cycleFilter !== 'all'
 
     // ── Export ────────────────────────────────────────────────
     const handleExport = async () => {
@@ -194,6 +233,7 @@ export default function PlanningPage() {
                 zone: zoneSearch || undefined,
                 zoneExact: zoneExact ? "true" : undefined,
                 presenceFilter: presenceFilter !== 'all' ? presenceFilter : undefined,
+                cycleFilter: cycleFilter !== 'all' ? cycleFilter : undefined, // NOUVEAU
             })
             downloadFile(data, `planning_${new Date().toISOString().split('T')[0]}.xlsx`)
             toast.success(`Export — ${filteredEmployees.length} employé(s)`)
@@ -201,6 +241,7 @@ export default function PlanningPage() {
             toast.error("Erreur lors de l'export")
         }
     }
+
     // ─────────────────────────────────────────────────────────
     // Render
     // ─────────────────────────────────────────────────────────
@@ -225,15 +266,15 @@ export default function PlanningPage() {
                     Planning de présence
                 </h1>
 
-                {/* ── Filtre période ── */}
+                {/* ── Filtre période avec bouton de recherche ── */}
                 <div className="flex flex-wrap items-center gap-3 bg-card p-4 rounded-xl border">
                     <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground">Du</span>
                         <Input
                             type="date"
-                            value={dateDebut}
-                            onChange={(e) => setDateDebut(e.target.value)}
+                            value={tempDateDebut}
+                            onChange={(e) => setTempDateDebut(e.target.value)}
                             className="w-auto h-8 text-sm"
                         />
                     </div>
@@ -241,16 +282,36 @@ export default function PlanningPage() {
                         <span className="text-sm text-muted-foreground">au</span>
                         <Input
                             type="date"
-                            value={dateFin}
-                            onChange={(e) => setDateFin(e.target.value)}
+                            value={tempDateFin}
+                            onChange={(e) => setTempDateFin(e.target.value)}
                             className="w-auto h-8 text-sm"
                         />
                     </div>
-                    {(dateDebut || dateFin) && (
-                        <Button variant="ghost" size="sm" onClick={() => { setDateDebut(''); setDateFin('') }}>
-                            Réinitialiser
-                        </Button>
-                    )}
+
+                    {/* Bouton de recherche (loupe) */}
+                    <Button
+                        size="sm"
+                        onClick={handlePeriodSearch}
+                        className="h-8 gap-1"
+                    >
+                        <Search className="h-3.5 w-3.5" />
+                        Rechercher
+                    </Button>
+
+                    {/* Bouton de réinitialisation */}
+                    {(tempDateDebut !== dateDebut || tempDateFin !== dateFin ||
+                        (tempDateDebut && dateDebut && tempDateDebut !== dateDebut) ||
+                        (tempDateFin && dateFin && tempDateFin !== dateFin)) && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleResetDates}
+                                className="h-8"
+                            >
+                                <X className="h-3.5 w-3.5 mr-1" />
+                                Réinitialiser
+                            </Button>
+                        )}
                 </div>
 
                 {/* ── Filtres employés ── */}
@@ -262,10 +323,10 @@ export default function PlanningPage() {
                     >
                         <div className="flex items-center gap-2">
                             <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span>Filtres</span>
+                            <span>Filtres employés</span>
                             {hasActiveFilters && (
                                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
-                                    {[searchText, posteSearch, zoneSearch, presenceFilter !== 'all' ? '1' : ''].filter(Boolean).length}
+                                    {[searchText, posteSearch, zoneSearch, presenceFilter !== 'all' ? '1' : '', cycleFilter !== 'all' ? '1' : ''].filter(Boolean).length}
                                 </span>
                             )}
                         </div>
@@ -277,7 +338,7 @@ export default function PlanningPage() {
 
                     {filtersExpanded && (
                         <div className="px-4 pb-4 pt-1 space-y-4 border-t">
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mt-3">
 
                                 {/* Recherche matricule / nom / prénom */}
                                 <div className="space-y-1.5">
@@ -287,7 +348,7 @@ export default function PlanningPage() {
                                     <div className="relative">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                         <Input
-                                            placeholder="mat1, dupont, jean…"
+                                            placeholder="matricule, nom, prenom…"
                                             value={searchText}
                                             onChange={(e) => setSearchText(e.target.value)}
                                             className="pl-8 h-8 text-sm"
@@ -296,15 +357,15 @@ export default function PlanningPage() {
                                     <p className="text-[10px] text-muted-foreground">Séparer par virgule pour OR</p>
                                 </div>
 
-                                {/* Recherche poste */}
+                                {/* Recherche Fonction */}
                                 <div className="space-y-1.5">
                                     <Label className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">
-                                        Poste
+                                        Fonction
                                     </Label>
                                     <div className="relative">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                         <Input
-                                            placeholder="tech, agent, chef…"
+                                            placeholder="chauffeur, agent, chef…"
                                             value={posteSearch}
                                             onChange={(e) => setPosteSearch(e.target.value)}
                                             className="pl-8 h-8 text-sm"
@@ -321,7 +382,7 @@ export default function PlanningPage() {
                                     <div className="relative">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                         <Input
-                                            placeholder="zone1, zone2…"
+                                            placeholder="Parc 08, OUED SEMAR...."
                                             value={zoneSearch}
                                             onChange={(e) => setZoneSearch(e.target.value)}
                                             className="pl-8 h-8 text-sm"
@@ -366,6 +427,29 @@ export default function PlanningPage() {
                                         Basé sur les présences calculées
                                     </p>
                                 </div>
+
+                                {/* NOUVEAU : Filtre cycle */}
+                                <div className="space-y-1.5">
+                                    <Label className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">
+                                        Cycle de travail
+                                    </Label>
+                                    <Select
+                                        value={cycleFilter}
+                                        onValueChange={(v) => setCycleFilter(v as any)}
+                                    >
+                                        <SelectTrigger className="h-8 text-sm">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Tous les employés</SelectItem>
+                                            <SelectItem value="with_cycle">Avec cycle</SelectItem>
+                                            <SelectItem value="without_cycle">Sans cycle</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-[10px] text-muted-foreground">
+                                        Filtre basé sur l'affectation d'un cycle
+                                    </p>
+                                </div>
                             </div>
 
                             {/* Résultat + clear */}
@@ -376,8 +460,8 @@ export default function PlanningPage() {
                                     <span className="font-semibold text-foreground">{allEmployees.length}</span>
                                 </p>
                                 {hasActiveFilters && (
-                                    <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-xs gap-1.5">
-                                        <X className="h-3 w-3" />
+                                    <Button variant="outline" size="sm" onClick={clearFilters} className="h-7 border-red-400 text-xs gap-1.5">
+                                        <Trash2 className="h-3 w-3" />
                                         Effacer les filtres
                                     </Button>
                                 )}

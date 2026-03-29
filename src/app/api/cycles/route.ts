@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { verifySession } from "@/actions/permissions";
 
 // POST /api/cycles - Créer un cycle (rare, généralement via détection)
 export async function POST(request: NextRequest) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const body = await request.json();
     const { employeeId, type, restDays, travail, repos, start_phase } = body;
 

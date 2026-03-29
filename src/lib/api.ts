@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API_URL = "http://10.0.10.1:3000/api";
+// const API_URL = "http://localhost:3000/api";
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -124,19 +125,83 @@ export const workspacesApi = {
     api.get(`/workspaces/${id}/export?format=${format}`, {
       responseType: "blob",
     }),
+  importWorkspace: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    return api.post("/workspaces/import", formData);
+    // ← بلا headers! axios يضيف boundary تلقائياً
+  },
 };
 
 export const employeesApi = {
-  getAll: (params?: any) => api.get("/employees", { params }),
+  // ── Liste ──────────────────────────────────────────────────
+  getAll: (params?: {
+    workspace_id?: string;
+    search?: string;
+    zone?: string;
+    presence?:
+      | "1m"
+      | "2m"
+      | "3m"
+      | "absent_1m"
+      | "absent_2m"
+      | "absent_3m"
+      | "never"
+      | "all";
+    page?: number;
+    limit?: number;
+  }) => api.get("/employees", { params }),
+
+  // ── Détail ─────────────────────────────────────────────────
   getDetails: (id: string, params?: { debut?: string; fin?: string }) =>
     api.get(`/employees/${id}`, { params }),
 
-  // GET /api/employees/[id]/planning  → calendrier
+  // ── Planning mensuel ───────────────────────────────────────
   getPlanning: (id: string, params?: { debut?: string; fin?: string }) =>
     api.get(`/employees/${id}/planning`, { params }),
 
-  // GET /api/employees/[id]/pointages  → détail pointages
+  // ── Pointages ──────────────────────────────────────────────
   getPointages: (id: string, params?: { debut?: string; fin?: string }) =>
     api.get(`/employees/${id}/pointages`, { params }),
-  create: (data: Partial<Employee>) => api.post("/employees", data),
+
+  // ── Créer (+ cycle optionnel) ─────────────────────────────
+  create: (data: {
+    matricule: string;
+    nom?: string;
+    prenom?: string;
+    poste?: string;
+    zone?: string;
+    workspace_id: string;
+    cycle?: {
+      type: "weekly" | "rotation" | "night";
+      rest_days?: number[]; // weekly
+      travail?: number; // rotation/night
+      repos?: number; // rotation/night
+      start_phase?: number; // rotation/night
+    };
+  }) => api.post("/employees", data),
+
+  // ── Modifier infos + cycle ─────────────────────────────────
+  update: (
+    id: string,
+    data: {
+      nom?: string;
+      prenom?: string;
+      poste?: string;
+      zone?: string;
+      cycle?: {
+        type: "weekly" | "rotation" | "night" | "unknown";
+        rest_days?: number[];
+        travail?: number;
+        repos?: number;
+        start_phase?: number;
+      } | null;
+    },
+  ) => api.patch(`/employees/${id}`, data),
+
+  // ── Supprimer un seul ──────────────────────────────────────
+  deleteOne: (id: string) => api.delete(`/employees/${id}`),
+
+  // ── Supprimer plusieurs ────────────────────────────────────
+  deleteMany: (ids: string[]) => api.delete("/employees", { data: { ids } }),
 };

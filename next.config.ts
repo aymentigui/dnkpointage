@@ -7,8 +7,11 @@ const withNextIntl = createNextIntlPlugin();
 const nextConfig = {
   reactStrictMode: false,
   experimental: {
+    proxyClientMaxBodySize: 1024 * 1024 * 100,
+    middlewareClientMaxBodySize: 1024 * 1024 * 100,
     serverActions: {
-      bodySizeLimit: 1024 * 1024 , 
+      bodySizeLimit: 1024 * 1024 * 100, // 100MB
+      proxyClientMaxBodySize: 1024 * 1024 * 100,
     },
   },
 };

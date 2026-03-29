@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { cookies } from "next/headers";
+import { verifySession } from "@/actions/permissions";
 
 // GET /api/workspaces/current - Récupérer le workspace actif
 export async function GET() {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const cookieStore = await cookies();
     const currentId = cookieStore.get("currentWorkspace")?.value;
 
@@ -28,6 +36,14 @@ export async function GET() {
 // POST /api/workspaces/current - Définir le workspace actif
 export async function POST(request: NextRequest) {
   try {
+    const session = await verifySession();
+
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const body = await request.json();
     const { workspaceId } = body;
 

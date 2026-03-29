@@ -24,37 +24,40 @@ import toast from 'react-hot-toast'
 // ─── Config annotations ───────────────────────────────────────
 
 const ANNOT_BASE = [
-    { code: 'P', label: 'Présent', Icon: CheckCircle2, active: 'bg-emerald-500 border-emerald-500 text-white', rest: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-    { code: 'A', label: 'Absent', Icon: XCircle, active: 'bg-rose-500 border-rose-500 text-white', rest: 'bg-rose-50 border-rose-200 text-rose-700' },
-    { code: 'R', label: 'Repos', Icon: Coffee, active: 'bg-slate-700 border-slate-700 text-white', rest: 'bg-slate-50 border-slate-200 text-slate-600' },
+    { code: 'P', label: 'Présent', Icon: CheckCircle2, active: 'bg-emerald-600 border-emerald-600 text-white', rest: 'bg-emerald-100 border-emerald-300 text-emerald-800' },
+    { code: 'A', label: 'Absent', Icon: XCircle, active: 'bg-rose-600 border-rose-600 text-white', rest: 'bg-rose-100 border-rose-300 text-rose-800' },
+    { code: 'R', label: 'Repos', Icon: Coffee, active: 'bg-slate-800 border-slate-800 text-white', rest: 'bg-slate-100 border-slate-300 text-slate-700' },
 ]
 
 const ANNOT_TYPES = [
-    { code: 'M', label: 'Mission', Icon: FileText, color: '#2563eb', light: '#eff6ff', border: '#bfdbfe' },
-    { code: 'J', label: 'Justifié', Icon: CheckCircle2, color: '#059669', light: '#ecfdf5', border: '#a7f3d0' },
-    { code: 'Md', label: 'Maladie', Icon: Stethoscope, color: '#dc2626', light: '#fef2f2', border: '#fecaca' },
-    { code: 'Rc', label: 'Récupération', Icon: RefreshCw, color: '#7c3aed', light: '#f5f3ff', border: '#ddd6fe' },
-    { code: 'C', label: 'Congé', Icon: Palmtree, color: '#d97706', light: '#fffbeb', border: '#fde68a' },
-    { code: 'Ce', label: 'Congé exceptionnel', Icon: Sparkles, color: '#db2777', light: '#fdf2f8', border: '#fbcfe8' },
+    { code: 'M', label: 'Mission', Icon: FileText, color: '#1e40af', light: '#dbeafe', border: '#bfdbfe' },
+    { code: 'J', label: 'Justifié', Icon: CheckCircle2, color: '#047857', light: '#d1fae5', border: '#a7f3d0' },
+    { code: 'Md', label: 'Maladie', Icon: Stethoscope, color: '#b91c1c', light: '#fee2e2', border: '#fecaca' },
+    { code: 'Rc', label: 'Récupération', Icon: RefreshCw, color: '#6d28d9', light: '#ede9fe', border: '#ddd6fe' },
+    { code: 'C', label: 'Congé', Icon: Palmtree, color: '#b45309', light: '#ffedd5', border: '#fde68a' },
+    { code: 'Ce', label: 'Congé exceptionnel', Icon: Sparkles, color: '#be185d', light: '#fce7f3', border: '#fbcfe8' },
 ]
 
 const ANNOT_LABELS: Record<string, string> = Object.fromEntries(ANNOT_TYPES.map(a => [a.code, a.label]))
 const getAnnotLabel = (code: string) => ANNOT_LABELS[code] ?? code
 
 const CELL_COLORS: Record<string, { bg: string; text: string }> = {
-    P: { bg: '#f0fdf4', text: '#15803d' },
-    A: { bg: '#fff1f2', text: '#be123c' },
-    R: { bg: '#f8fafc', text: '#64748b' },
-    M: { bg: '#eff6ff', text: '#1d4ed8' },
-    J: { bg: '#f0fdf4', text: '#059669' },
-    Md: { bg: '#fef2f2', text: '#dc2626' },
-    Rc: { bg: '#f5f3ff', text: '#6d28d9' },
-    C: { bg: '#fffbeb', text: '#b45309' },
-    Ce: { bg: '#fdf2f8', text: '#be185d' },
+    P: { bg: '#dcfce7', text: '#166534' },
+    A: { bg: '#ffe4e6', text: '#9f1239' },
+    R: { bg: '#f1f5f9', text: '#334155' },
+    M: { bg: '#dbeafe', text: '#1e40af' },
+    J: { bg: '#d1fae5', text: '#047857' },
+    Md: { bg: '#fee2e2', text: '#b91c1c' },
+    Rc: { bg: '#ede9fe', text: '#6d28d9' },
+    C: { bg: '#ffedd5', text: '#b45309' },
+    Ce: { bg: '#fce7f3', text: '#be185d' },
 }
 
 const ANNOT_SET = new Set(['M', 'J', 'Md', 'Rc', 'C', 'Ce'])
-const PAGE_SIZE = 30
+
+// Options de taille de page
+const PAGE_SIZE_OPTIONS = [10, 30, 50, 200, 300]
+const DEFAULT_PAGE_SIZE = 30
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -74,6 +77,86 @@ interface HistoryEntry {
     type_modification: string
     modifie_par: string | null
     modifie_le: string
+}
+
+// ─── EmployeeInfoTooltip ─────────────────────────────────────
+
+interface EmployeeInfoTooltipProps {
+    visible: boolean
+    employee: {
+        matricule: string
+        nom?: string
+        prenom?: string
+        poste?: string
+        zone?: string
+        cycles?: any
+    }
+    posX: number
+    posY: number
+}
+
+function EmployeeInfoTooltip({ visible, employee, posX, posY }: EmployeeInfoTooltipProps) {
+    if (!visible) return null
+
+    const getCycleLabel = (cycle: any): string => {
+        if (!cycle) return '—'
+        if (cycle.type === 'weekly') {
+            try {
+                let days = JSON.parse(cycle.rest_days || '[]')
+                if (typeof days === 'string') days = JSON.parse(days)
+                return `Repos: ${days.map((d: number) => ['Di', 'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa'][d]).join('-')}`
+            } catch (e) {
+                return '?'
+            }
+        }
+        if (cycle.type === 'rotation') return `${cycle.travail}T / ${cycle.repos}R`
+        if (cycle.type === 'night') return `🌙 ${cycle.travail}/${cycle.repos}`
+        return '?'
+    }
+
+    return (
+        <div
+            className="fixed z-[9999] pointer-events-none"
+            style={{ left: posX, top: posY }}
+        >
+            <div className="bg-slate-900 text-white rounded-xl shadow-2xl p-3 w-[280px] text-[11px] animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-start justify-between gap-3 mb-2 pb-2 border-b border-white/10">
+                    <div className="flex-1">
+                        <div className="flex items-center gap-1.5 mb-1">
+                            <span className="font-mono text-xs font-bold text-emerald-400">{employee.matricule}</span>
+                            {employee.cycles?.est_manuel && (
+                                <span className="text-[9px] px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded border border-amber-500/30 font-medium">
+                                    Manuel
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-sm font-semibold text-white">
+                            {employee.prenom} {employee.nom}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="space-y-1.5">
+                    {employee.poste && (
+                        <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Poste</span>
+                            <span className="text-slate-200 font-medium">{employee.poste}</span>
+                        </div>
+                    )}
+                    {employee.zone && (
+                        <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Zone</span>
+                            <span className="text-slate-200 font-medium">{employee.zone}</span>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Cycle</span>
+                        <span className="text-slate-200 font-mono text-[10px]">{getCycleLabel(employee.cycles)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
 }
 
 // ─── StatutBadge ─────────────────────────────────────────────
@@ -99,8 +182,8 @@ function StatutBadge({ code }: { code: string | null | undefined }) {
 interface TooltipState {
     visible: boolean
     history: HistoryEntry[]
-    statut: string          // statut actuel affiché
-    statut_original: string | null   // statut calculé depuis pointages/cycle
+    statut: string
+    statut_original: string | null
     date: string
     posX: number
     posY: number
@@ -111,7 +194,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
 
     const { history, statut, statut_original, date } = state
     const hasHistory = history.length > 0
-    // Le statut a changé par rapport au calcul automatique
     const wasModified = statut_original && statut_original !== statut
 
     return (
@@ -120,8 +202,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
             style={{ left: state.posX, top: state.posY }}
         >
             <div className="bg-slate-900 text-white rounded-xl shadow-2xl p-3 w-[240px] text-[11px]">
-
-                {/* Date */}
                 <div className="flex items-center gap-1.5 mb-2.5 pb-2 border-b border-white/10">
                     <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
                     <span className="text-slate-300 font-medium">
@@ -131,7 +211,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
                     </span>
                 </div>
 
-                {/* Statuts */}
                 <div className="space-y-1.5 mb-2">
                     <div className="flex items-center justify-between">
                         <span className="text-slate-400">Statut actuel</span>
@@ -152,7 +231,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
                     )}
                 </div>
 
-                {/* Historique des modifications */}
                 {hasHistory ? (
                     <div className="pt-2 border-t border-white/10 space-y-2">
                         <p className="text-slate-500 uppercase tracking-wide text-[9px] font-semibold">
@@ -160,7 +238,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
                         </p>
                         {history.map((h, idx) => (
                             <div key={idx} className="space-y-0.5">
-                                {/* ancien → nouveau */}
                                 <div className="flex items-center gap-1.5">
                                     <StatutBadge code={h.ancien_statut} />
                                     <ArrowRight className="w-2.5 h-2.5 text-slate-500 shrink-0" />
@@ -169,7 +246,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
                                         {h.type_modification === 'annotation' ? '🏷️' : '✏️'}
                                     </span>
                                 </div>
-                                {/* Qui + quand */}
                                 <div className="flex items-center justify-between text-[9px] text-slate-500 pl-0.5">
                                     {h.modifie_par ? (
                                         <span className="text-slate-400 font-medium truncate max-w-[110px]">
@@ -213,11 +289,12 @@ interface AnnotModalProps {
         annotCode?: string; annotLibelle?: string
     }[]) => void
     onSuccess: () => void
+    onAfterSave?: () => void  // Nouveau callback pour restaurer la page
 }
 
 function AnnotModal({
     open, onOpenChange, cells, currentCode, currentStatut,
-    onOptimisticUpdate, onSuccess,
+    onOptimisticUpdate, onSuccess, onAfterSave,
 }: AnnotModalProps) {
     const [base, setBase] = useState('')
     const [annot, setAnnot] = useState('')
@@ -260,6 +337,8 @@ function AnnotModal({
                     : planningApi.update(employeeId, { date, statut: base })
             ))
             onSuccess()
+            // Appeler le callback après la sauvegarde réussie
+            if (onAfterSave) onAfterSave()
         } catch {
             toast.error('Erreur serveur — rechargement recommandé')
         } finally { setSaving(false) }
@@ -278,7 +357,6 @@ function AnnotModal({
                 </div>
 
                 <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
-                    {/* Statuts de base */}
                     <div>
                         <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">Statut</p>
                         <div className="grid grid-cols-3 gap-2">
@@ -399,10 +477,14 @@ function getCycleLabel(cycle: any): string {
             let days = JSON.parse(cycle.rest_days || '[]')
             if (typeof days === 'string') days = JSON.parse(days)
             return `R:${days.map((d: number) => ['Di', 'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa'][d]).join('-')}`
-        } catch { return '?' }
+        } catch (e) {
+            console.error(e)
+            return '?'
+        }
     }
     if (cycle.type === 'rotation') return `${cycle.travail}T/${cycle.repos}R`
     if (cycle.type === 'night') return `🌙${cycle.travail}/${cycle.repos}`
+    console.log(cycle)
     return '?'
 }
 
@@ -433,13 +515,38 @@ export function PlanningTable({
     const router = useRouter()
 
     // ── Pagination ────────────────────────────────────────────
+    const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
     const [page, setPage] = useState(0)
-    const totalPages = Math.ceil(employees.length / PAGE_SIZE)
+    const totalPages = Math.ceil(employees.length / pageSize)
     const pagedEmployees = useMemo(
-        () => employees.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-        [employees, page]
+        () => employees.slice(page * pageSize, (page + 1) * pageSize),
+        [employees, page, pageSize]
     )
-    useMemo(() => { setPage(0) }, [employees])
+
+    // Réinitialiser la page quand la taille de page change
+    useEffect(() => {
+        setPage(0)
+    }, [pageSize])
+
+    // Réinitialiser la page quand la liste des employés change
+    useEffect(() => {
+        setPage(0)
+    }, [employees.length])
+
+    // Fonction pour changer la taille de page
+    const handlePageSizeChange = (newSize: number) => {
+        setPageSize(newSize)
+    }
+
+    // Fonction pour aller à la première page
+    const goToFirstPage = useCallback(() => {
+        setPage(0)
+    }, [])
+
+    // Fonction pour aller à la dernière page
+    const goToLastPage = useCallback(() => {
+        setPage(totalPages - 1)
+    }, [totalPages])
 
     // ── Sélection ─────────────────────────────────────────────
     const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set())
@@ -461,8 +568,21 @@ export function PlanningTable({
     }
     const [tooltip, setTooltip] = useState<TooltipState>(TOOLTIP_EMPTY)
 
+    const [employeeTooltip, setEmployeeTooltip] = useState<{
+        visible: boolean
+        employee: any
+        posX: number
+        posY: number
+    }>({
+        visible: false,
+        employee: null,
+        posX: 0,
+        posY: 0,
+    })
+
     const hideTooltip = useCallback(() => {
         setTooltip(t => ({ ...t, visible: false }))
+        setEmployeeTooltip(prev => ({ ...prev, visible: false }))
     }, [])
 
     const showTooltip = useCallback((
@@ -479,6 +599,21 @@ export function PlanningTable({
         const posX = Math.min(rect.left, window.innerWidth - 260)
 
         setTooltip({ visible: true, history, statut, statut_original, date, posX, posY })
+    }, [])
+
+    const showEmployeeTooltip = useCallback((e: React.MouseEvent, employee: any) => {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const tipHeight = 200
+        const spaceBelow = window.innerHeight - rect.bottom
+        const posY = spaceBelow > tipHeight ? rect.bottom + 6 : rect.top - tipHeight - 6
+        const posX = Math.min(rect.left, window.innerWidth - 280)
+
+        setEmployeeTooltip({
+            visible: true,
+            employee,
+            posX,
+            posY,
+        })
     }, [])
 
     // ── Optimistic update ─────────────────────────────────────
@@ -540,7 +675,6 @@ export function PlanningTable({
         )?.statut || ''
     }
 
-    // Retourne { history, statut_original } d'un jour donné
     const getCellMeta = (matricule: string, date: string): {
         history: HistoryEntry[]
         statut_original: string | null
@@ -621,6 +755,12 @@ export function PlanningTable({
         setAnnotModalOpen(true)
     }
 
+    // Callback pour restaurer la page après sauvegarde
+    const handleAfterSave = useCallback(() => {
+        // Ne rien faire car la page reste inchangée
+        // Ce callback est juste pour éviter que le modal ne fasse rien de spécial
+    }, [])
+
     // ── En-têtes ──────────────────────────────────────────────
     const renderMonthHeaders = () => {
         const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
@@ -637,9 +777,10 @@ export function PlanningTable({
 
         return (
             <TableRow className="border-b border-slate-200">
-                <TableHead className="sticky left-0 bg-white z-20 w-[200px]" />
-                <TableHead className="sticky left-[200px] bg-white z-20 w-[70px]" />
-                <TableHead className="sticky left-[270px] bg-white z-20 w-[140px]" />
+                <TableHead className="sticky left-0 bg-white z-20 w-[40px]" />
+                <TableHead className="sticky left-[40px] bg-white z-20 w-[200px]" />
+                <TableHead className="sticky left-[240px] bg-white z-20 w-[70px]" />
+                <TableHead className="sticky left-[310px] bg-white z-20 w-[140px]" />
                 {groups.map((g, i) => (
                     <TableHead key={i} colSpan={g.count} className="text-center bg-slate-50 border-x border-slate-100 py-1.5 px-0">
                         <span className="text-[11px] font-semibold text-slate-600">{g.name}</span>
@@ -653,9 +794,10 @@ export function PlanningTable({
         const days = ['Di', 'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa']
         return (
             <TableRow className="border-b-2 border-slate-200">
-                <TableHead className="sticky left-0 bg-white z-20 w-[200px] text-xs font-semibold text-slate-500 px-3">Employé</TableHead>
-                <TableHead className="sticky left-[200px] bg-white z-20 w-[70px] text-xs font-semibold text-slate-500 text-center">Zone</TableHead>
-                <TableHead className="sticky left-[270px] bg-white z-20 w-[140px] text-center">
+                <TableHead className="sticky left-0 bg-white z-20 w-[40px] text-center text-[10px] font-semibold text-slate-400">#</TableHead>
+                <TableHead className="sticky left-[40px] bg-white z-20 w-[200px] text-xs font-semibold text-slate-500 px-3">Employé</TableHead>
+                <TableHead className="sticky left-[240px] bg-white z-20 w-[70px] text-xs font-semibold text-slate-500 text-center">Zone</TableHead>
+                <TableHead className="sticky left-[310px] bg-white z-20 w-[140px] text-center">
                     <div className="flex items-center justify-center gap-1 flex-wrap py-0.5">
                         {[
                             { key: 'P', label: 'Présences', color: 'bg-emerald-50 text-emerald-700' },
@@ -696,10 +838,14 @@ export function PlanningTable({
 
     return (
         <>
-            {/* ── Tooltip global (rendu en dehors du tableau pour éviter overflow) ── */}
             <HistoryTooltip state={tooltip} />
+            <EmployeeInfoTooltip
+                visible={employeeTooltip.visible}
+                employee={employeeTooltip.employee}
+                posX={employeeTooltip.posX}
+                posY={employeeTooltip.posY}
+            />
 
-            {/* ── Table ── */}
             <div
                 className="border border-slate-200 rounded-2xl overflow-auto relative bg-white shadow-sm"
                 onMouseLeave={hideTooltip}
@@ -714,6 +860,7 @@ export function PlanningTable({
                         {pagedEmployees.map((emp, empIdx) => {
                             const isEmpSel = selectedEmployees.has(emp.matricule)
                             const stats = getStats(emp.matricule)
+                            const rowNumber = page * pageSize + empIdx + 1
 
                             return (
                                 <TableRow key={emp.id}
@@ -723,13 +870,33 @@ export function PlanningTable({
                                         empIdx % 2 !== 0 && 'bg-slate-50/30'
                                     )}>
 
+                                    {/* Colonne numéro */}
+                                    <TableCell
+                                        className={cn('sticky left-0 z-10 p-0 w-[40px] text-center',
+                                            isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white'
+                                        )}
+                                        onMouseEnter={(e) => showEmployeeTooltip(e, emp)}
+                                        onMouseLeave={hideTooltip}
+                                    >
+                                        <div className="flex items-center justify-center h-full min-h-[36px]">
+                                            <span className="text-[11px] font-mono text-slate-400">{rowNumber}</span>
+                                        </div>
+                                    </TableCell>
+
                                     {/* Colonne employé */}
-                                    <TableCell className={cn('sticky left-0 z-10 p-0 w-[200px]', isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white')}>
+                                    <TableCell
+                                        className={cn('sticky left-[40px] z-10 p-0 w-[200px]',
+                                            isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white'
+                                        )}
+                                        onMouseEnter={(e) => showEmployeeTooltip(e, emp)}
+                                        onMouseLeave={hideTooltip}
+                                    >
                                         <div className="flex items-stretch h-full min-h-[36px]">
                                             <button onClick={e => toggleEmployee(emp.matricule, e)}
                                                 className={cn('w-7 flex items-center justify-center shrink-0 transition-colors border-r border-slate-100',
                                                     isEmpSel ? 'bg-slate-900' : 'hover:bg-slate-100')}>
-                                                <div className={cn('w-3 h-3 rounded border transition-all', isEmpSel ? 'bg-white border-white' : 'border-slate-300')} />
+                                                <div className={cn('w-3 h-3 rounded border transition-all',
+                                                    isEmpSel ? 'bg-white border-white' : 'border-slate-300')} />
                                             </button>
                                             <div className="flex-1 px-2 py-1.5 min-w-0">
                                                 <div className="flex items-center gap-1.5">
@@ -738,9 +905,8 @@ export function PlanningTable({
                                                         <span className="text-[9px] px-1 py-0.5 bg-amber-50 text-amber-600 rounded border border-amber-200 font-medium">M</span>
                                                     )}
                                                 </div>
-                                                {emp.nom && (
-                                                    <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.prenom} {emp.nom}</div>
-                                                )}
+                                                <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.prenom} {emp.nom}</div>
+                                                <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.poste}</div>
                                                 <div className="text-[10px] text-slate-400 font-mono">{getCycleLabel(emp.cycles)}</div>
                                             </div>
                                             <button
@@ -753,12 +919,20 @@ export function PlanningTable({
                                     </TableCell>
 
                                     {/* Zone */}
-                                    <TableCell className={cn('sticky left-[200px] z-10 text-center p-1 w-[70px]', isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white')}>
+                                    <TableCell
+                                        className={cn('sticky left-[240px] z-10 text-center p-1 w-[70px]',
+                                            isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white'
+                                        )}
+                                        onMouseEnter={(e) => showEmployeeTooltip(e, emp)}
+                                        onMouseLeave={hideTooltip}
+                                    >
                                         <ZoneColumn zone={emp.zone} />
                                     </TableCell>
 
                                     {/* Stats */}
-                                    <TableCell className={cn('sticky left-[270px] z-10 p-1 w-[140px]', isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white')}>
+                                    <TableCell className={cn('sticky left-[310px] z-10 p-1 w-[140px]',
+                                        isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white'
+                                    )}>
                                         <StatsCell stats={stats} />
                                     </TableCell>
 
@@ -772,7 +946,6 @@ export function PlanningTable({
                                         const isWE = [5, 6].includes(new Date(+y, +m - 1, +d).getDay())
                                         const { history, statut_original } = getCellMeta(emp.matricule, date)
                                         const hasHistory = history.length > 0
-                                        // Cellule modifiée = statut diffère du calcul automatique
                                         const wasModified = statut_original && statut_original !== code
 
                                         return (
@@ -792,7 +965,6 @@ export function PlanningTable({
                                                     style={colors ? { color: colors.text } : { color: '#cbd5e1' }}>
                                                     {code || (isWE ? '·' : '')}
                                                 </span>
-                                                {/* Point orange = modification manuelle */}
                                                 {(hasHistory || wasModified) && (
                                                     <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-orange-400 opacity-80" />
                                                 )}
@@ -806,39 +978,130 @@ export function PlanningTable({
                 </Table>
             </div>
 
-            {/* ── Pagination ── */}
-            {totalPages > 1 && (
+            {/* Pagination avec sélecteur de taille */}
+            {employees.length > 0 && (
                 <div className="flex items-center justify-between px-1 mt-4">
-                    <span className="text-xs text-slate-400">
-                        {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, employees.length)} sur {employees.length} employés
-                    </span>
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs text-slate-400">
+                            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, employees.length)} sur {employees.length} employés
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">Afficher :</span>
+                            <select
+                                value={pageSize}
+                                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                                className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                            >
+                                {PAGE_SIZE_OPTIONS.map(size => (
+                                    <option key={size} value={size}>
+                                        {size}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
                     <div className="flex items-center gap-1">
-                        <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                            <ChevronLeft className="w-3.5 h-3.5" />Précédent
+                        <button
+                            onClick={goToFirstPage}
+                            disabled={page === 0}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            <ChevronLeft className="w-3.5 h-3.5 -ml-1" />
+                            Première
                         </button>
+
+                        <button
+                            onClick={() => setPage(p => Math.max(0, p - 1))}
+                            disabled={page === 0}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            Précédent
+                        </button>
+
                         {(() => {
-                            const ws = 3
-                            let start = Math.max(0, Math.min(page - 1, totalPages - ws))
-                            const end = Math.min(totalPages - 1, start + ws - 1)
-                            start = Math.max(0, end - ws + 1)
-                            return Array.from({ length: end - start + 1 }, (_, i) => start + i).map(i => (
-                                <button key={i} onClick={() => setPage(i)}
-                                    className={cn('w-7 h-7 rounded-lg text-xs font-medium transition-colors',
-                                        i === page ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100')}>
-                                    {i + 1}
-                                </button>
-                            ))
+                            const maxVisible = 5
+                            const halfVisible = Math.floor(maxVisible / 2)
+
+                            let start = Math.max(0, page - halfVisible)
+                            let end = Math.min(totalPages - 1, start + maxVisible - 1)
+
+                            if (end - start + 1 < maxVisible) {
+                                start = Math.max(0, end - maxVisible + 1)
+                            }
+
+                            const pages = []
+
+                            if (start > 0) {
+                                pages.push(0)
+                                if (start > 1) {
+                                    pages.push('...')
+                                }
+                            }
+
+                            for (let i = start; i <= end; i++) {
+                                pages.push(i)
+                            }
+
+                            if (end < totalPages - 1) {
+                                if (end < totalPages - 2) {
+                                    pages.push('...')
+                                }
+                                pages.push(totalPages - 1)
+                            }
+
+                            return pages.map((item, idx) => {
+                                if (item === '...') {
+                                    return (
+                                        <span key={`ellipsis-${idx}`} className="px-1 text-slate-400 text-xs">
+                                            ...
+                                        </span>
+                                    )
+                                }
+                                const pageNum = item as number
+                                return (
+                                    <button
+                                        key={pageNum}
+                                        onClick={() => setPage(pageNum)}
+                                        className={cn(
+                                            'w-7 h-7 rounded-lg text-xs font-medium transition-colors',
+                                            pageNum === page
+                                                ? 'bg-slate-900 text-white'
+                                                : 'text-slate-500 hover:bg-slate-100'
+                                        )}
+                                    >
+                                        {pageNum + 1}
+                                    </button>
+                                )
+                            })
                         })()}
-                        <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                            Suivant<ChevronRight className="w-3.5 h-3.5" />
+
+                        <button
+                            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                            disabled={page === totalPages - 1}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Suivant
+                            <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                            onClick={goToLastPage}
+                            disabled={page === totalPages - 1}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Dernière
+                            <ChevronRight className="w-3.5 h-3.5" />
+                            <ChevronRight className="w-3.5 h-3.5 -ml-1" />
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* ── Floating bar cellules ── */}
+            {/* Floating bar cellules */}
             {nbCellsSelected > 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-3 duration-200">
                     <div className="flex items-center gap-2">
@@ -861,7 +1124,7 @@ export function PlanningTable({
                 </div>
             )}
 
-            {/* ── Floating bar employés ── */}
+            {/* Floating bar employés */}
             {selectedEmployees.size > 0 && nbCellsSelected === 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-indigo-950 text-white px-4 py-2.5 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-3 duration-200">
                     <div className="flex items-center gap-2">
@@ -882,25 +1145,28 @@ export function PlanningTable({
                 </div>
             )}
 
-            {/* ── CycleModal ── */}
+            {/* CycleModal */}
             <CycleModal
                 open={cycleModalOpen}
                 onOpenChange={setCycleModalOpen}
-                employeeId={firstSelectedEmp?.id ?? ''}
+                employeeIds={Array.from(selectedEmployees)
+                    .map(mat => employees.find(e => e.matricule === mat)?.id)
+                    .filter(Boolean) as string[]
+                }
                 employeeMatricule={
                     selectedEmployees.size > 1
                         ? `${selectedEmployees.size} employés`
                         : firstSelectedEmp?.matricule ?? ''
                 }
-                currentCycle={firstSelectedEmp?.cycles}
+                currentCycle={selectedEmployees.size === 1 ? firstSelectedEmp?.cycles : undefined}
                 onSuccess={() => {
                     setCycleModalOpen(false)
                     clearEmployeeSelection()
-                    toast.success(selectedEmployees.size > 1 ? `${selectedEmployees.size} cycles mis à jour` : 'Cycle mis à jour')
+                    onUpdate()
                 }}
             />
 
-            {/* ── AnnotModal ── */}
+            {/* AnnotModal */}
             <AnnotModal
                 open={annotModalOpen}
                 onOpenChange={setAnnotModalOpen}
@@ -909,6 +1175,7 @@ export function PlanningTable({
                 currentStatut={annotSingleStatut}
                 onOptimisticUpdate={handleOptimisticUpdate}
                 onSuccess={clearCellSelection}
+                onAfterSave={handleAfterSave}
             />
         </>
     )

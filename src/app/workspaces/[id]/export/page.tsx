@@ -51,39 +51,7 @@ export default function ExportPage() {
                     </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Card className="hover:shadow-lg transition-shadow">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <FileSpreadsheet className="h-5 w-5 text-green-500" />
-                                Export Excel
-                            </CardTitle>
-                            <CardDescription>
-                                Planning complet avec plusieurs feuilles :
-                                <ul className="list-disc list-inside mt-2 text-sm">
-                                    <li>Planning détaillé</li>
-                                    <li>Récapitulatif par employé</li>
-                                    <li>Annotations</li>
-                                    <li>Résumé des absences</li>
-                                </ul>
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <Button
-                                className="w-full"
-                                onClick={() => handleExport('excel')}
-                                disabled={exporting !== null}
-                            >
-                                {exporting === 'excel' ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                    <Download className="h-4 w-4 mr-2" />
-                                )}
-                                Télécharger Excel
-                            </Button>
-                        </CardContent>
-                    </Card>
-
+                <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
                     <Card className="hover:shadow-lg transition-shadow">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">

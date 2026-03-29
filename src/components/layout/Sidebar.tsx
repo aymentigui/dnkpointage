@@ -62,7 +62,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             isCollapsed ? "w-[60px]" : "w-[240px]"
         )}>
             {/* Toggle Button */}
-            <Button
+            {/* <Button
                 variant="ghost"
                 size="icon"
                 className="absolute -right-3 top-6 h-6 w-6 rounded-full border bg-background"
@@ -73,7 +73,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
                 ) : (
                     <ChevronLeft className="h-3 w-3" />
                 )}
-            </Button>
+            </Button> */}
 
             <ScrollArea className="h-full py-4">
                 <div className="space-y-1 px-2">

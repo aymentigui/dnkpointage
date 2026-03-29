@@ -4,20 +4,23 @@
 //   workspaceId    : string
 //   debut          : YYYY-MM-DD
 //   fin            : YYYY-MM-DD
-//   search         : "mat1,dupont,jean"   → matricule OU nom OU prénom contient
+//   search         : "mat1,nom ,prenom"   → matricule OU nom OU prénom contient
 //   poste          : "tech,agent"         → poste contient (OR)
 //   zone           : "zone1,zone2"        → zone contient OU exact selon zoneExact
-//   zoneExact      : "true"              → zone = exact match
+//   zoneExact      : "true"               → zone = exact match
 //   presenceFilter : "all" | "has" | "none"
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as XLSX from "xlsx";
+// import { verifySession } from "@/actions/permissions"; // À décommenter si besoin
 
 const SEUIL_BADGEUSE_UNIQUE_MIN = 15;
 const SEUIL_SORTIE_MATIN_MAX_H = 8;
 const SEUIL_ENTREE_NUIT_MIN_H = 14;
 const SEUIL_SORTIE_NUIT_MAX_H = 10;
+
+// 🔥 AJOUT DE "A" ET "P" POUR FORCER LES ABSENCES ET PRÉSENCES VIA ANNOTATION
 const ANNOT_CODES = new Set(["M", "J", "Md", "Rc", "C", "Ce"]);
 
 // ─────────────────────────────────────────────────────────────
@@ -55,6 +58,9 @@ function matchesExact(
 
 export async function GET(request: NextRequest) {
   try {
+    // const session = await verifySession();
+    // if (!session?.data?.user) return NextResponse.json({ message: "Vous devez être connecté" }, { status: 401 });
+
     const sp = request.nextUrl.searchParams;
 
     const dateDebut = sp.get("debut");
@@ -87,10 +93,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Aucun employé" }, { status: 404 });
     }
 
-    const allEmployeeIds = allEmployees.map((e) => e.id);
+    const allEmployeeIds = allEmployees.map((e: any) => e.id);
 
     // ── 2. Charger pointages pour calcul présences ────────────
-    //    (nécessaire pour le filtre presenceFilter)
     const allPointages = await prisma.pointage.findMany({
       where: {
         employee_id: { in: allEmployeeIds },
@@ -114,7 +119,7 @@ export async function GET(request: NextRequest) {
 
     // ── 3. Construire presenceMap (nombre présences par empId) ─
     const cycleParEmp = new Map<string, any>();
-    allEmployees.forEach((e) => cycleParEmp.set(e.id, e.cycles ?? null));
+    allEmployees.forEach((e: any) => cycleParEmp.set(e.id, e.cycles ?? null));
 
     const toMinutes = (h: string) => {
       const [hh, mm] = h.split(":").map(Number);
@@ -133,7 +138,7 @@ export async function GET(request: NextRequest) {
     const marquerFinNuit = (empId: string, d: string) =>
       finNuitMap.set(`${empId}_${d}`, true);
 
-    allPointages.forEach((p) => {
+    allPointages.forEach((p: any) => {
       const dateStr = p.date.toISOString().split("T")[0];
       const empId = p.employee_id;
       const cycle = cycleParEmp.get(empId);
@@ -193,7 +198,7 @@ export async function GET(request: NextRequest) {
 
     // Compter présences par employé
     const nbPresencesParEmp = new Map<string, number>();
-    allEmployees.forEach((emp) => {
+    allEmployees.forEach((emp: any) => {
       let count = 0;
       presenceMap.forEach((_, key) => {
         if (key.startsWith(`${emp.id}_`)) count++;
@@ -202,8 +207,7 @@ export async function GET(request: NextRequest) {
     });
 
     // ── 4. Appliquer tous les filtres ─────────────────────────
-    const employees = allEmployees.filter((emp) => {
-      // Filtre search (matricule / nom / prénom)
+    const employees = allEmployees.filter((emp: any) => {
       if (searchTokens.length > 0) {
         if (
           !matchesAny(emp.matricule, searchTokens) &&
@@ -212,27 +216,20 @@ export async function GET(request: NextRequest) {
         )
           return false;
       }
-
-      // Filtre poste
       if (posteTokens.length > 0) {
         if (!matchesAny(emp.poste, posteTokens)) return false;
       }
-
-      // Filtre zone (exact ou contains)
       if (zoneTokens.length > 0) {
         const ok = zoneExact
           ? matchesExact(emp.zone, zoneTokens)
           : matchesAny(emp.zone, zoneTokens);
         if (!ok) return false;
       }
-
-      // Filtre présences
       if (presenceFilter !== "all") {
         const nb = nbPresencesParEmp.get(emp.id) ?? 0;
         if (presenceFilter === "has" && nb === 0) return false;
         if (presenceFilter === "none" && nb > 0) return false;
       }
-
       return true;
     });
 
@@ -243,23 +240,37 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const employeeIds = employees.map((e) => e.id);
+    const employeeIds = employees.map((e: any) => e.id);
 
-    // ── 5. Charger annotations + plannings BDD pour les employés filtrés ──
-    const [allAnnotations, allPlannings] = await Promise.all([
-      prisma.annotation.findMany({
-        where: { employee_id: { in: employeeIds }, ...dateCondition },
-        include: { employee: { select: { matricule: true } } },
-      }),
-      prisma.planning.findMany({
-        where: { employee_id: { in: employeeIds }, ...dateCondition },
-        include: {
-          employee: { select: { matricule: true } },
-          annotation: true,
-        },
-        orderBy: { date: "asc" },
-      }),
-    ]);
+    // ── 5. Charger annotations, plannings BDD et ANCRE ABSOLUE ──
+    const [allAnnotations, allPlannings, premiersPointages] = await Promise.all(
+      [
+        prisma.annotation.findMany({
+          where: { employee_id: { in: employeeIds }, ...dateCondition },
+          include: { employee: { select: { matricule: true } } },
+        }),
+        prisma.planning.findMany({
+          where: { employee_id: { in: employeeIds }, ...dateCondition },
+          include: {
+            employee: { select: { matricule: true } },
+            annotation: true,
+          },
+          orderBy: { date: "asc" },
+        }),
+        // 🔥 NOUVEAU : Récupérer la date du TOUT PREMIER pointage
+        prisma.pointage.groupBy({
+          by: ["employee_id"],
+          _min: { date: true },
+          where: { employee_id: { in: employeeIds } },
+        }),
+      ],
+    );
+
+    // ── Map d'ancrage des cycles (Date de référence absolue) ──
+    const anchorMap = new Map<string, Date>();
+    premiersPointages.forEach((p) => {
+      if (p._min.date) anchorMap.set(p.employee_id, p._min.date);
+    });
 
     // ── 6. Dates de la période ────────────────────────────────
     let toutesLesDates: string[] = [];
@@ -274,13 +285,13 @@ export async function GET(request: NextRequest) {
       }
     } else {
       const datesSet = new Set<string>();
-      allPlannings.forEach((p) =>
+      allPlannings.forEach((p: any) =>
         datesSet.add(p.date.toISOString().split("T")[0]),
       );
-      allAnnotations.forEach((a) =>
+      allAnnotations.forEach((a: any) =>
         datesSet.add(a.date.toISOString().split("T")[0]),
       );
-      allPointages.forEach((p) =>
+      allPointages.forEach((p: any) =>
         datesSet.add(p.date.toISOString().split("T")[0]),
       );
       toutesLesDates = Array.from(datesSet).sort();
@@ -288,7 +299,7 @@ export async function GET(request: NextRequest) {
 
     // ── 7. Maps ───────────────────────────────────────────────
     const planningMap = new Map<string, any>();
-    allPlannings.forEach((p) =>
+    allPlannings.forEach((p: any) =>
       planningMap.set(
         `${p.employee.matricule}_${p.date.toISOString().split("T")[0]}`,
         p,
@@ -296,7 +307,7 @@ export async function GET(request: NextRequest) {
     );
 
     const annotMap = new Map<string, any>();
-    allAnnotations.forEach((a) =>
+    allAnnotations.forEach((a: any) =>
       annotMap.set(
         `${a.employee.matricule}_${a.date.toISOString().split("T")[0]}`,
         a,
@@ -319,6 +330,8 @@ export async function GET(request: NextRequest) {
 
     for (const emp of employees) {
       const jours: Record<string, string> = {};
+      const anchorDate = anchorMap.get(emp.id) || null; // 🔥 On récupère l'ancre
+
       const stats: Record<string, number> = {
         P: 0,
         A: 0,
@@ -334,43 +347,83 @@ export async function GET(request: NextRequest) {
         presences_supplementaires: 0,
       };
 
-      toutesLesDates.forEach((dateStr, i) => {
+      toutesLesDates.forEach((dateStr) => {
         const annotKey = `${emp.matricule}_${dateStr}`;
         const presenceKey = `${emp.id}_${dateStr}`;
-        const veilleKey = `${emp.id}_${decalerJour(dateStr, -1)}`;
+        const veilleDateStr = decalerJour(dateStr, -1);
+        const veilleKey = `${emp.id}_${veilleDateStr}`;
         const planKey = `${emp.matricule}_${dateStr}`;
         const finNuitKey = `${emp.id}_${dateStr}`;
 
         const annot = annotMap.get(annotKey) ?? null;
         const hadPointage = presenceMap.has(presenceKey);
-        const devraitRepos = estJourRepos(new Date(dateStr), emp.cycles, i);
+
+        // 🔥 NOUVEAU : Intégration de la fin de nuit dans la logique globale
+        const estFinNuit =
+          finNuitMap.has(finNuitKey) || finNuitMap.has(veilleKey);
+        const devraitRepos =
+          estJourRepos(new Date(dateStr), emp.cycles, anchorDate) || estFinNuit;
 
         let code = "";
-        if (finNuitMap.has(finNuitKey)) code = "R";
-        else if (finNuitMap.has(veilleKey)) code = "R";
-        else if (hadPointage)
-          code = annot && ANNOT_CODES.has(annot.code) ? annot.code : "P";
-        else if (annot && ANNOT_CODES.has(annot.code)) code = annot.code;
+
+        // 1. PRIORITÉ ABSOLUE : Les annotations explicites (M, C, A, P...)
+        if (annot && ANNOT_CODES.has(annot.code)) {
+          code = annot.code;
+        }
+        // 2. PRIORITÉ SECONDAIRE : Le planning BDD
         else if (planningMap.has(planKey)) {
           const plan = planningMap.get(planKey);
           const pa = plan.annotation ?? null;
-          code = pa && ANNOT_CODES.has(pa.code) ? pa.code : plan.statut;
-        } else code = devraitRepos ? "R" : "A";
+          if (pa && ANNOT_CODES.has(pa.code)) {
+            code = pa.code;
+          } else {
+            code = plan.statut;
+          }
+        }
+        // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles)
+        else if (estFinNuit) {
+          code = "R";
+        } else if (hadPointage) {
+          code = "P";
+        } else {
+          code = estJourRepos(new Date(dateStr), emp.cycles, anchorDate)
+            ? "R"
+            : "A";
+        }
 
         jours[dateStr] = code;
 
+        // ── 9. Calcul des Statistiques ──
         if (code === "P") {
           stats.P++;
           if (devraitRepos) stats.presences_supplementaires++;
+          // Si on force un P sans badgeage sur un jour travaillé
+          if (!hadPointage && !devraitRepos) {
+            stats.A++;
+            stats.absences_annotees++;
+          }
         } else if (code === "R") {
           stats.R++;
+          // Si on force un R sur un jour qui devait être travaillé (sans badgeage)
+          if (!hadPointage && !devraitRepos) {
+            stats.A++;
+            stats.absences_annotees++;
+          }
         } else if (ANNOT_CODES.has(code)) {
-          if (hadPointage) {
-            stats.P++;
-            if (devraitRepos) stats.presences_supplementaires++;
+          // Pour les autres codes (M, C, J, etc.), on les compte comme présents justifiés
+          stats.P++;
+
+          if (code in stats) {
+            stats[code as keyof typeof stats]++;
+          }
+
+          // if (hadPointage) {
+          //   if (devraitRepos) stats.presences_supplementaires++;
+          // }else
+          if (devraitRepos) {
+            stats.presences_supplementaires++;
           } else {
             stats.A++;
-            stats[code as keyof typeof stats]++;
             stats.absences_annotees++;
           }
         } else {
@@ -392,7 +445,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ── 9. Excel ──────────────────────────────────────────────
+    // ── 10. Excel ──────────────────────────────────────────────
     const months = [
       "Jan",
       "Fév",
@@ -596,8 +649,14 @@ function getCycleLabel(cycle: any): string {
   return "Inconnu";
 }
 
-function estJourRepos(date: Date, cycle: any, index: number): boolean {
+// 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS (Comme les autres APIs) 🔥
+function estJourRepos(
+  date: Date,
+  cycle: any,
+  anchorDate: Date | null,
+): boolean {
   if (!cycle || cycle.type === "unknown") return [5, 6].includes(date.getDay());
+
   if (cycle.type === "weekly") {
     try {
       return JSON.parse(cycle.rest_days || "[]").includes(date.getDay());
@@ -605,9 +664,21 @@ function estJourRepos(date: Date, cycle: any, index: number): boolean {
       return false;
     }
   }
+
   if (cycle.type === "rotation" || cycle.type === "night") {
+    if (!anchorDate) return false;
+
+    const targetMs = new Date(date.toISOString().split("T")[0]).getTime();
+    const anchorMs = new Date(anchorDate.toISOString().split("T")[0]).getTime();
+    const diffDays = Math.round((targetMs - anchorMs) / 86400000);
+
     const cl = (cycle.travail || 2) + (cycle.repos || 2);
-    return (index + (cycle.start_phase || 0)) % cl >= (cycle.travail || 2);
+
+    let position = (diffDays + (cycle.start_phase || 0)) % cl;
+    if (position < 0) position += cl;
+
+    return position >= (cycle.travail || 2);
   }
+
   return false;
 }

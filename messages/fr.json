@@ -166,7 +166,7 @@
         "errorsendcode": "Erreur lors de l'envoi du code",
         "errorconfirmation": "Erreur lors de la confirmation",
         "error2afa": "Erreur lors de la configuration de la vérification en deux étapes",
-        "account_blocked": "Compte bloqué. Réessayez dans {{minutes}} minutes.",
+        "account_blocked": "Compte bloqué. Réessayez dans {minutes} minutes.",
         "too_many_attempts": "Trop de tentatives. Compte bloqué pour 15 minutes.",
         "error_oauth_signin": "Erreur lors de l'initiation de la connexion OAuth",
         "error_oauth_callback": "Erreur lors du callback OAuth",
@@ -179,7 +179,8 @@
         "error_session_required": "Session requise",
         "error_unknown": "Une erreur inconnue est survenue",
         "oauth_provider_error": "Erreur d'authentification {provider}",
-        "oauth_config_missing": "Configuration OAuth manquante pour {provider}"
+        "oauth_config_missing": "Configuration OAuth manquante pour {provider}",
+        "account_locked": "Compte bloqué. Réessayez dans {minutes} minutes."
     },
     "Settings": {
         "title": "Paramètres",

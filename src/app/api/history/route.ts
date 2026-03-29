@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { verifySession } from "@/actions/permissions";
 
 // GET /api/history - Historique global des modifications
 export async function GET(request: NextRequest) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const searchParams = request.nextUrl.searchParams;
     const employeeId = searchParams.get("employeeId");
     const dateDebut = searchParams.get("debut");
@@ -97,6 +105,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   // Cette route est principalement utilisée par d'autres APIs
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const body = await request.json();
     const {
       employeeId,

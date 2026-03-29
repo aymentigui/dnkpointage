@@ -1,18 +1,8 @@
 // app/api/workspaces/[id]/planning/route.ts
-//
-// Priorité par jour :
-// 1. finNuitMap[date]        → R  (fin de nuit)
-// 2. finNuitMap[veille]      → R  (repos récup après nuit)
-// 3. presenceMap[date]       → P  ou code annotation si présent+annoté
-// 4. annotMap[date]          → code annotation (M, J, Md, Rc, C, Ce)
-// 5. planningMap[date]       → statut BDD (planning manuel)
-// 6. cycle                   → R ou A
-//
-// Chaque jour retourné inclut un champ "history" avec l'historique
-// des modifications (ancien_statut, nouveau_statut, qui, quand)
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+// import { verifySession } from "@/actions/permissions"; // À décommenter si besoin
 
 const SEUIL_BADGEUSE_UNIQUE_MIN = 15;
 const SEUIL_SORTIE_MATIN_MAX_H = 8;
@@ -23,6 +13,9 @@ const ANNOT_CODES = new Set(["M", "J", "Md", "Rc", "C", "Ce"]);
 
 export async function GET(request: NextRequest, { params }: any) {
   try {
+    // const session = await verifySession();
+    // if (!session?.data?.user) return NextResponse.json({ message: "Vous devez être connecté" }, { status: 401 });
+
     const paramsId = await params;
     const workspaceId = paramsId.id;
     const searchParams = request.nextUrl.searchParams;
@@ -53,55 +46,61 @@ export async function GET(request: NextRequest, { params }: any) {
     }
 
     // ── Fetch en parallèle ────────────────────────────────────
-    const [allAnnotations, allPointages, allPlannings, allHistories] =
-      await Promise.all([
-        prisma.annotation.findMany({
-          where: { employee_id: { in: employeeIds }, ...dateCondition },
-          include: { employee: { select: { matricule: true } } },
-        }),
+    const [
+      allAnnotations,
+      allPointages,
+      allPlannings,
+      allHistories,
+      premiersPointages,
+    ] = await Promise.all([
+      prisma.annotation.findMany({
+        where: { employee_id: { in: employeeIds }, ...dateCondition },
+        include: { employee: { select: { matricule: true } } },
+      }),
 
-        // J-1 pour les nuits
-        prisma.pointage.findMany({
-          where: {
-            employee_id: { in: employeeIds },
-            ...(dateDebut && dateFin
-              ? {
-                  date: {
-                    gte: new Date(new Date(dateDebut).getTime() - 86400000),
-                    lte: new Date(dateFin),
-                  },
-                }
-              : {}),
-          },
-          select: {
-            employee_id: true,
-            date: true,
-            heure_entree: true,
-            heure_sortie: true,
-            est_nuit: true,
-          },
-        }),
+      // J-1 pour les nuits
+      prisma.pointage.findMany({
+        where: {
+          employee_id: { in: employeeIds },
+          ...(dateDebut && dateFin
+            ? {
+                date: {
+                  gte: new Date(new Date(dateDebut).getTime() - 86400000),
+                  lte: new Date(dateFin),
+                },
+              }
+            : {}),
+        },
+        select: {
+          employee_id: true,
+          date: true,
+          heure_entree: true,
+          heure_sortie: true,
+          est_nuit: true,
+        },
+      }),
 
-        prisma.planning.findMany({
-          where: { employee_id: { in: employeeIds }, ...dateCondition },
-          include: {
-            employee: { select: { matricule: true } },
-            annotation: true,
-          },
-        }),
+      prisma.planning.findMany({
+        where: { employee_id: { in: employeeIds }, ...dateCondition },
+        include: {
+          employee: { select: { matricule: true } },
+          annotation: true,
+        },
+      }),
 
-        // Historique des modifications pour la période
-        prisma.modification_history.findMany({
-          where: {
-            employee_id: { in: employeeIds },
-            ...dateCondition,
-          },
-          include: {
-            employee: { select: { matricule: true } },
-          },
-          orderBy: { created_at: "asc" },
-        }),
-      ]);
+      prisma.modification_history.findMany({
+        where: { employee_id: { in: employeeIds }, ...dateCondition },
+        include: { employee: { select: { matricule: true } } },
+        orderBy: { created_at: "asc" },
+      }),
+
+      // 🔥 NOUVEAU : Récupérer la date du TOUT PREMIER pointage par employé pour l'ancrage
+      prisma.pointage.groupBy({
+        by: ["employee_id"],
+        _min: { date: true },
+        where: { employee_id: { in: employeeIds } },
+      }),
+    ]);
 
     // ── Charger les users pour les noms ───────────────────────
     const userIds = [
@@ -126,6 +125,12 @@ export async function GET(request: NextRequest, { params }: any) {
         : [];
 
     const userMap = new Map(users.map((u) => [u.id, u]));
+
+    // ── Map d'ancrage des cycles (Date de référence absolue) ──
+    const anchorMap = new Map<string, Date>();
+    premiersPointages.forEach((p) => {
+      if (p._min.date) anchorMap.set(p.employee_id, p._min.date);
+    });
 
     // ── Générer les dates ─────────────────────────────────────
     let toutesLesDates: string[] = [];
@@ -153,7 +158,6 @@ export async function GET(request: NextRequest, { params }: any) {
     }
 
     // ── Maps ──────────────────────────────────────────────────
-
     const annotMap = new Map<string, any>();
     allAnnotations.forEach((a) => {
       annotMap.set(
@@ -170,7 +174,6 @@ export async function GET(request: NextRequest, { params }: any) {
       );
     });
 
-    // "matricule_dateStr" → array of history entries
     const historyMap = new Map<string, any[]>();
     allHistories.forEach((h) => {
       const key = `${h.employee.matricule}_${h.date.toISOString().split("T")[0]}`;
@@ -282,9 +285,10 @@ export async function GET(request: NextRequest, { params }: any) {
     // ── Construire les plannings ──────────────────────────────
     for (const emp of employees) {
       const cycle = emp.cycles ?? null;
+      const anchorDate = anchorMap.get(emp.id) || null; // 🔥 On récupère la date d'ancrage
 
-      for (let i = 0; i < toutesLesDates.length; i++) {
-        const dateStr = toutesLesDates[i];
+      for (const element of toutesLesDates) {
+        const dateStr = element;
         const date = new Date(dateStr);
         const presenceKey = `${emp.id}_${dateStr}`;
         const finNuitKey = `${emp.id}_${dateStr}`;
@@ -309,26 +313,20 @@ export async function GET(request: NextRequest, { params }: any) {
         let statut = "";
         let annotation_id: string | null = null;
 
-        if (finNuitMap.has(finNuitKey)) {
-          statut = "R";
-        } else if (finNuitMap.has(veilleFinKey)) {
-          statut = "R";
-        } else if (presenceMap.has(presenceKey)) {
-          if (annot && ANNOT_CODES.has(annot.code)) {
-            statut = annot.code;
-            annotation_id = annot.id;
-          } else {
-            statut = "P";
-          }
-        } else if (annot && ANNOT_CODES.has(annot.code)) {
+        // 1. PRIORITÉ ABSOLUE : Les annotations explicites (M, C, A, P...)
+        if (annot && ANNOT_CODES.has(annot.code)) {
           statut = annot.code;
           annotation_id = annot.id;
-        } else if (planningMap.has(planKey)) {
+        }
+        // 2. PRIORITÉ SECONDAIRE : Le planning modifié (si annoté)
+        else if (planningMap.has(planKey)) {
           const plan = planningMap.get(planKey);
           const planAnnot = plan.annotation ?? null;
+
           if (planAnnot && ANNOT_CODES.has(planAnnot.code)) {
             statut = planAnnot.code;
             annotation_id = plan.annotation_id;
+
             if (!annot) {
               result[emp.matricule].annotations.push({
                 id: planAnnot.id,
@@ -341,22 +339,29 @@ export async function GET(request: NextRequest, { params }: any) {
             statut = plan.statut;
             annotation_id = plan.annotation_id;
           }
+        }
+        // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles)
+        else if (finNuitMap.has(finNuitKey) || finNuitMap.has(veilleFinKey)) {
+          statut = "R";
+        } else if (presenceMap.has(presenceKey)) {
+          statut = "P";
         } else {
-          statut = estJourRepos(date, cycle, i) ? "R" : "A";
+          // S'il n'y a pas de badgeage ni d'annotation, on vérifie si c'est un jour de repos
+          statut = estJourRepos(date, cycle, anchorDate) ? "R" : "A";
         }
 
+        // Ajout final au tableau des plannings
         result[emp.matricule].plannings.push({
           id: null,
           date,
           statut,
           annotation_id,
-          // ── Historique de ce jour ──────────────────────────
           history,
           statut_original: (() => {
             if (finNuitMap.has(finNuitKey)) return "R";
             if (finNuitMap.has(veilleFinKey)) return "R";
             if (presenceMap.has(presenceKey)) return "P";
-            return estJourRepos(date, cycle, i) ? "R" : "A";
+            return estJourRepos(date, cycle, anchorDate) ? "R" : "A";
           })(),
         });
       }
@@ -366,6 +371,7 @@ export async function GET(request: NextRequest, { params }: any) {
     for (const emp of employees) {
       const empData = result[emp.matricule];
       const cycle = emp.cycles ?? null;
+      const anchorDate = anchorMap.get(emp.id) || null;
 
       let presents = 0,
         absences = 0,
@@ -373,21 +379,43 @@ export async function GET(request: NextRequest, { params }: any) {
       let repos = 0,
         presences_supplementaires = 0;
 
-      empData.plannings.forEach((p: any, i: number) => {
+      empData.plannings.forEach((p: any) => {
         const dateStr = new Date(p.date).toISOString().split("T")[0];
         const statut = p.statut;
+
         const hadPointage = presenceMap.has(`${emp.id}_${dateStr}`);
-        const devraitR = estJourRepos(new Date(dateStr), cycle, i);
+
+        // 🔥 NOUVEAU : Récupérer l'information de fin de nuit pour les stats
+        const veilleDateStr = decalerJour(dateStr, -1);
+        const estFinNuit =
+          finNuitMap.has(`${emp.id}_${dateStr}`) ||
+          finNuitMap.has(`${emp.id}_${veilleDateStr}`);
+
+        // 🔥 CORRECTION : Un employé "devrait" être en repos si c'est son cycle OU si c'est une fin de nuit
+        const devraitR =
+          estJourRepos(new Date(dateStr), cycle, anchorDate) || estFinNuit;
 
         if (statut === "P") {
           presents++;
           if (devraitR) presences_supplementaires++;
+          // ida kan absent mais radinah p donc absences++ et absences_annotees++
+          if (!hadPointage && !devraitR) {
+            absences++;
+            absences_annotees++;
+          }
         } else if (statut === "R") {
           repos++;
+          // ida kan absent mais radinah R donc absences++ et absences_annotees++
+          if (!hadPointage && !devraitR) {
+            absences++;
+            absences_annotees++;
+          }
         } else if (ANNOT_CODES.has(statut)) {
+          presents++; // Remarque: selon ta règle, une annotation M/C compte comme présent dans le total "presents"
           if (hadPointage) {
-            presents++;
             if (devraitR) presences_supplementaires++;
+          } else if (devraitR) {
+            presences_supplementaires++;
           } else {
             absences++;
             absences_annotees++;
@@ -400,7 +428,7 @@ export async function GET(request: NextRequest, { params }: any) {
       empData.stats = {
         presents,
         absences,
-        absences_nettes: absences - absences_annotees,
+        absences_nettes: absences,
         absences_annotees,
         repos,
         presences_supplementaires,
@@ -418,8 +446,14 @@ export async function GET(request: NextRequest, { params }: any) {
   }
 }
 
-function estJourRepos(date: Date, cycle: any, index: number): boolean {
+// 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS 🔥
+function estJourRepos(
+  date: Date,
+  cycle: any,
+  anchorDate: Date | null,
+): boolean {
   if (!cycle || cycle.type === "unknown") return [5, 6].includes(date.getDay());
+
   if (cycle.type === "weekly") {
     try {
       return JSON.parse(cycle.rest_days || "[]").includes(date.getDay());
@@ -427,9 +461,23 @@ function estJourRepos(date: Date, cycle: any, index: number): boolean {
       return false;
     }
   }
+
   if (cycle.type === "rotation" || cycle.type === "night") {
+    if (!anchorDate) return false; // Si l'employé n'a aucun historique, on ne peut pas aligner la phase
+
+    // Calcul propre de la différence en jours (indépendant de l'heure pour éviter les soucis de fuseau)
+    const targetMs = new Date(date.toISOString().split("T")[0]).getTime();
+    const anchorMs = new Date(anchorDate.toISOString().split("T")[0]).getTime();
+    const diffDays = Math.round((targetMs - anchorMs) / 86400000);
+
     const cl = (cycle.travail || 2) + (cycle.repos || 2);
-    return (index + (cycle.start_phase || 0)) % cl >= (cycle.travail || 2);
+
+    // Formule sécurisée même si on cherche une date AVANT le premier pointage (diffDays négatif)
+    let position = (diffDays + (cycle.start_phase || 0)) % cl;
+    if (position < 0) position += cl;
+
+    return position >= (cycle.travail || 2);
   }
+
   return false;
 }

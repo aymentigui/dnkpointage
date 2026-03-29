@@ -358,14 +358,7 @@ export default function WorkspaceDetailPage() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <Card className="hover:bg-accent/50 cursor-pointer" onClick={() => handleExport('excel')}>
-                                        <CardContent className="flex flex-col items-center py-6">
-                                            <Download className="h-12 w-12 mb-2 text-primary" />
-                                            <p className="font-medium">Export Excel</p>
-                                            <p className="text-xs text-muted-foreground">Planning + Récapitulatif + Annotations</p>
-                                        </CardContent>
-                                    </Card>
+                                <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
                                     <Card className="hover:bg-accent/50 cursor-pointer" onClick={() => handleExport('json')}>
                                         <CardContent className="flex flex-col items-center py-6">
                                             <FileText className="h-12 w-12 mb-2 text-primary" />

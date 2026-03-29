@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as XLSX from "xlsx";
+import { verifySession } from "@/actions/permissions";
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const formData = await request.formData();
     const file = formData.get("file") as File;
     const mode = formData.get("mode") || "nouveau"; // 'nouveau' ou 'fusion'

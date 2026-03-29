@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { verifySession } from "@/actions/permissions";
 
 // GET /api/history/employee/[employeeId] - Historique d'un employé spécifique
 export async function GET(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const paramsId = await params;
     const { employeeId } = paramsId;
     const searchParams = request.nextUrl.searchParams;
@@ -91,6 +99,13 @@ export async function GET(request: NextRequest, { params }: any) {
 // DELETE /api/history/employee/[employeeId] - Effacer l'historique d'un employé
 export async function DELETE(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const paramsId = await params;
     const { employeeId } = paramsId;
 

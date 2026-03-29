@@ -31,6 +31,7 @@ export default auth(async (req) => {
     if (isLogging) {
       const domainUrl = process.env.DOMAIN_URL;
       console.log(domainUrl);
+      console.log(process.env.NEXT_PUBLIC_API_URL);
 
       if (!domainUrl) {
         console.log("DOMAIN_URL is not defined in the environment variables");
@@ -38,7 +39,7 @@ export default auth(async (req) => {
           "DOMAIN_URL is not defined in the environment variables",
         );
       }
-      const response = NextResponse.redirect(`${domainUrl}/admin`);
+      const response = NextResponse.redirect(`${domainUrl}`);
       response.cookies.set("lang", lang);
       return response;
     }

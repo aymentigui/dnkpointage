@@ -146,7 +146,7 @@ export function EmployeeTable({ employees, workspaceId, onUpdate }: EmployeeTabl
             <CycleModal
                 open={openCycleModal}
                 onOpenChange={setOpenCycleModal}
-                employeeId={selectedEmployeeId ?? ''}
+                employeeIds={[selectedEmployeeId ?? '']}
                 employeeMatricule={selectedMatricule ?? ''}
                 currentCycle={currentCycle}
                 onSuccess={handleSuccesUpdateCycle}

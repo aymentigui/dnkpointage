@@ -16,13 +16,21 @@ const SEUIL_SORTIE_MATIN_MAX_H = 8;
 const SEUIL_ENTREE_NUIT_MIN_H = 14;
 const SEUIL_SORTIE_NUIT_MAX_H = 10;
 
-const ANNOT_CODES = new Set(["M", "J", "Md", "Rc", "C", "Ce"]);
+// 🔥 AJOUT DE "A" ET "P" POUR FORCER LES ABSENCES ET PRÉSENCES VIA ANNOTATION
+const ANNOT_CODES = new Set(["M", "J", "Md", "Rc", "C", "Ce", "A", "P"]);
 
 // ─────────────────────────────────────────────────────────────
 // GET
 // ─────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest, { params }: any) {
   try {
+    const session = await verifySession();
+    if (!session?.data?.user) {
+      return NextResponse.json(
+        { message: "Vous devez être connecté" },
+        { status: 401 },
+      );
+    }
     const { id } = await params;
     const searchParams = request.nextUrl.searchParams;
     const dateDebut = searchParams.get("debut");
@@ -48,46 +56,56 @@ export async function GET(request: NextRequest, { params }: any) {
     }
 
     // ── Fetch en parallèle ────────────────────────────────────
-    const [plannings, annotations, pointages, histories] = await Promise.all([
-      prisma.planning.findMany({
-        where: { employee_id: id, ...dateCondition },
-        include: { annotation: true },
-        orderBy: { date: "asc" },
-      }),
+    const [plannings, annotations, pointages, histories, premierPointage] =
+      await Promise.all([
+        prisma.planning.findMany({
+          where: { employee_id: id, ...dateCondition },
+          include: { annotation: true },
+          orderBy: { date: "asc" },
+        }),
 
-      prisma.annotation.findMany({
-        where: { employee_id: id, ...dateCondition },
-        orderBy: { date: "asc" },
-      }),
+        prisma.annotation.findMany({
+          where: { employee_id: id, ...dateCondition },
+          orderBy: { date: "asc" },
+        }),
 
-      // J-1 pour capter les nuits commençant la veille
-      prisma.pointage.findMany({
-        where: {
-          employee_id: id,
-          ...(dateDebut && dateFin
-            ? {
-                date: {
-                  gte: new Date(new Date(dateDebut).getTime() - 86400000),
-                  lte: new Date(dateFin),
-                },
-              }
-            : {}),
-        },
-        select: {
-          date: true,
-          heure_entree: true,
-          heure_sortie: true,
-          est_nuit: true,
-        },
-        orderBy: { date: "asc" },
-      }),
+        // J-1 pour capter les nuits commençant la veille
+        prisma.pointage.findMany({
+          where: {
+            employee_id: id,
+            ...(dateDebut && dateFin
+              ? {
+                  date: {
+                    gte: new Date(new Date(dateDebut).getTime() - 86400000),
+                    lte: new Date(dateFin),
+                  },
+                }
+              : {}),
+          },
+          select: {
+            date: true,
+            heure_entree: true,
+            heure_sortie: true,
+            est_nuit: true,
+          },
+          orderBy: { date: "asc" },
+        }),
 
-      // Historique des modifications pour la période
-      prisma.modification_history.findMany({
-        where: { employee_id: id, ...dateCondition },
-        orderBy: { created_at: "asc" },
-      }),
-    ]);
+        // Historique des modifications pour la période
+        prisma.modification_history.findMany({
+          where: { employee_id: id, ...dateCondition },
+          orderBy: { created_at: "asc" },
+        }),
+
+        // Récupérer la date du TOUT PREMIER pointage pour l'ancrage absolu
+        prisma.pointage.aggregate({
+          where: { employee_id: id },
+          _min: { date: true },
+        }),
+      ]);
+
+    // 🔥 Sécurisation : L'ancre pour aligner la rotation
+    const anchorDate = premierPointage?._min?.date || null;
 
     // ── Charger les users pour noms ───────────────────────────
     const userIds = [
@@ -260,30 +278,35 @@ export async function GET(request: NextRequest, { params }: any) {
       const annot = annotMap.get(dateStr) ?? null;
       const history = historyByDate.get(dateStr) ?? [];
 
-      // ── Statut original (calculé depuis pointages/cycle) ────
-      // = ce que le système calcule sans tenir compte du planning BDD
+      // ── Statut original (strictement badgeuse + cycle, sans modif) ────
       const statutOriginal = (() => {
         if (finNuitMap.has(dateStr)) return "R";
         if (finNuitMap.has(veilleDateStr)) return "R";
-        if (presenceMap.has(dateStr)) {
-          return annot && ANNOT_CODES.has(annot.code) ? annot.code : "P";
-        }
-        if (annot && ANNOT_CODES.has(annot.code)) return annot.code;
-        return estJourRepos(date, cycle, i) ? "R" : "A";
+        if (presenceMap.has(dateStr)) return "P";
+        return estJourRepos(date, cycle, anchorDate) ? "R" : "A";
       })();
 
-      // ── Statut final (avec planning BDD) ────────────────────
-      let statut = statutOriginal;
+      // ── Statut final (avec application stricte des priorités) ──────────
+      let statut = "";
       let source: string = "calcule";
-      let annotRetour: any = annot
-        ? { id: annot.id, code: annot.code, libelle: annot.libelle }
-        : null;
+      let annotRetour: any = null;
 
-      // Si planning BDD existe → il peut surcharger
-      if (planningMap.has(dateStr)) {
+      // 1. PRIORITÉ ABSOLUE : Les annotations explicites (M, C, A, P...)
+      if (annot && ANNOT_CODES.has(annot.code)) {
+        statut = annot.code;
+        annotRetour = {
+          id: annot.id,
+          code: annot.code,
+          libelle: annot.libelle,
+        };
+        source = "bdd";
+      }
+      // 2. PRIORITÉ SECONDAIRE : Le planning modifié (si annoté ou forcé manuellement)
+      else if (planningMap.has(dateStr)) {
         const plan = planningMap.get(dateStr);
         const planAnnot = plan.annotation ?? null;
         source = "bdd";
+
         if (planAnnot && ANNOT_CODES.has(planAnnot.code)) {
           statut = planAnnot.code;
           annotRetour = {
@@ -295,6 +318,10 @@ export async function GET(request: NextRequest, { params }: any) {
           statut = plan.statut;
         }
       }
+      // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles - on récupère le statut original)
+      else {
+        statut = statutOriginal;
+      }
 
       jours.push({
         date: dateStr,
@@ -303,7 +330,7 @@ export async function GET(request: NextRequest, { params }: any) {
         source,
         annotation: annotRetour,
         history,
-        pointage: null, // sera enrichi si besoin
+        pointage: null, // Si tu comptes le remplir plus tard
       });
     }
 
@@ -433,12 +460,14 @@ export async function POST(request: NextRequest, { params }: any) {
   }
 }
 
+// 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS 🔥
 function estJourRepos(
   date: Date,
   cycle: any,
-  indexDepuisDebut: number,
+  anchorDate: Date | null,
 ): boolean {
   if (!cycle || cycle.type === "unknown") return [5, 6].includes(date.getDay());
+
   if (cycle.type === "weekly") {
     try {
       return JSON.parse(cycle.rest_days || "[]").includes(date.getDay());
@@ -446,11 +475,21 @@ function estJourRepos(
       return false;
     }
   }
+
   if (cycle.type === "rotation" || cycle.type === "night") {
+    if (!anchorDate) return false;
+
+    const targetMs = new Date(date.toISOString().split("T")[0]).getTime();
+    const anchorMs = new Date(anchorDate.toISOString().split("T")[0]).getTime();
+    const diffDays = Math.round((targetMs - anchorMs) / 86400000);
+
     const cl = (cycle.travail || 2) + (cycle.repos || 2);
-    return (
-      (indexDepuisDebut + (cycle.start_phase || 0)) % cl >= (cycle.travail || 2)
-    );
+
+    let position = (diffDays + (cycle.start_phase || 0)) % cl;
+    if (position < 0) position += cl;
+
+    return position >= (cycle.travail || 2);
   }
+
   return false;
 }
