@@ -24,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: any) {
     if (!cycle) {
       return NextResponse.json({ error: "Cycle non trouvé" }, { status: 404 });
     }
-    console.log(body);
+    // console.log(body);
     const updated = await prisma.cycle.update({
       where: { employee_id: employeeId },
       data: {

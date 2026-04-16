@@ -46,11 +46,11 @@ export async function findExistingSession(
   os: string,
 ) {
   try {
-    console.log("userId", userId);
-    console.log("deviceName", deviceName);
-    console.log("deviceType", deviceType);
-    console.log("browser", browser);
-    console.log("os", os);
+    // console.log("userId", userId);
+    // console.log("deviceName", deviceName);
+    // console.log("deviceType", deviceType);
+    // console.log("browser", browser);
+    // console.log("os", os);
     const existingSession = await prisma.session.findFirst({
       where: {
         user_id: userId || "Unknown",

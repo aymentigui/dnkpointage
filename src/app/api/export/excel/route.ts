@@ -9,6 +9,7 @@
 //   zone           : "zone1,zone2"        → zone contient OU exact selon zoneExact
 //   zoneExact      : "true"               → zone = exact match
 //   presenceFilter : "all" | "has" | "none"
+//   cycleFilter    : "all" | "with_cycle" | "without_cycle"
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
     const zoneParam = sp.get("zone") ?? "";
     const zoneExact = sp.get("zoneExact") === "true";
     const presenceFilter = sp.get("presenceFilter") ?? "all"; // all | has | none
+    const cycleFilter = sp.get("cycleFilter") ?? "all"; // all | with_cycle | without_cycle
 
     const searchTokens = parseTokens(searchParam);
     const posteTokens = parseTokens(posteParam);
@@ -95,29 +97,44 @@ export async function GET(request: NextRequest) {
 
     const allEmployeeIds = allEmployees.map((e: any) => e.id);
 
-    // ── 2. Charger pointages pour calcul présences ────────────
-    const allPointages = await prisma.pointage.findMany({
-      where: {
-        employee_id: { in: allEmployeeIds },
-        ...(dateDebut && dateFin
+    // ── 2. Charger pointages, annotations et jours fériés ────────────
+    const [allPointages, allAnnotations, allJoursFeries] = await Promise.all([
+      prisma.pointage.findMany({
+        where: {
+          employee_id: { in: allEmployeeIds },
+          ...(dateDebut && dateFin
+            ? {
+                date: {
+                  gte: new Date(new Date(dateDebut).getTime() - 86400000),
+                  lte: new Date(dateFin),
+                },
+              }
+            : {}),
+        },
+        select: {
+          employee_id: true,
+          date: true,
+          heure_entree: true,
+          heure_sortie: true,
+          est_nuit: true,
+        },
+      }),
+      // On remonte la récupération des annotations ici pour pouvoir filtrer dessus
+      prisma.annotation.findMany({
+        where: { employee_id: { in: allEmployeeIds }, ...dateCondition },
+        include: { employee: { select: { matricule: true } } },
+      }),
+      // 🔥 NOUVEAU : Récupération des jours fériés
+      prisma.jour_ferie.findMany({
+        where: workspaceId
           ? {
-              date: {
-                gte: new Date(new Date(dateDebut).getTime() - 86400000),
-                lte: new Date(dateFin),
-              },
+              OR: [{ workspace_id: workspaceId }, { workspace_id: null }],
             }
-          : {}),
-      },
-      select: {
-        employee_id: true,
-        date: true,
-        heure_entree: true,
-        heure_sortie: true,
-        est_nuit: true,
-      },
-    });
+          : {},
+      }),
+    ]);
 
-    // ── 3. Construire presenceMap (nombre présences par empId) ─
+    // ── 3. Construire presenceMap et annotMap pour les stats ─
     const cycleParEmp = new Map<string, any>();
     allEmployees.forEach((e: any) => cycleParEmp.set(e.id, e.cycles ?? null));
 
@@ -206,6 +223,13 @@ export async function GET(request: NextRequest) {
       nbPresencesParEmp.set(emp.id, count);
     });
 
+    // Compter annotations par employé
+    const nbAnnotationsParEmp = new Map<string, number>();
+    allAnnotations.forEach((a: any) => {
+      const current = nbAnnotationsParEmp.get(a.employee_id) ?? 0;
+      nbAnnotationsParEmp.set(a.employee_id, current + 1);
+    });
+
     // ── 4. Appliquer tous les filtres ─────────────────────────
     const employees = allEmployees.filter((emp: any) => {
       if (searchTokens.length > 0) {
@@ -225,11 +249,32 @@ export async function GET(request: NextRequest) {
           : matchesAny(emp.zone, zoneTokens);
         if (!ok) return false;
       }
+
+      // Présence = (Pointage OU Annotation)
       if (presenceFilter !== "all") {
-        const nb = nbPresencesParEmp.get(emp.id) ?? 0;
-        if (presenceFilter === "has" && nb === 0) return false;
-        if (presenceFilter === "none" && nb > 0) return false;
+        const nbP = nbPresencesParEmp.get(emp.id) ?? 0;
+        const nbA = nbAnnotationsParEmp.get(emp.id) ?? 0;
+        const totalActivity = nbP + nbA;
+
+        if (presenceFilter === "has" && totalActivity === 0) return false;
+        if (presenceFilter === "none" && totalActivity > 0) return false;
       }
+
+      // 🔥 NOUVEAU : Filtre Cycle
+      if (cycleFilter !== "all") {
+        if (
+          cycleFilter === "with_cycle" &&
+          (!emp.cycles || emp.cycles.type === "unknown")
+        )
+          return false;
+        if (
+          cycleFilter === "without_cycle" &&
+          emp.cycles &&
+          emp.cycles.type !== "unknown"
+        )
+          return false;
+      }
+
       return true;
     });
 
@@ -242,29 +287,28 @@ export async function GET(request: NextRequest) {
 
     const employeeIds = employees.map((e: any) => e.id);
 
-    // ── 5. Charger annotations, plannings BDD et ANCRE ABSOLUE ──
-    const [allAnnotations, allPlannings, premiersPointages] = await Promise.all(
-      [
-        prisma.annotation.findMany({
-          where: { employee_id: { in: employeeIds }, ...dateCondition },
-          include: { employee: { select: { matricule: true } } },
-        }),
-        prisma.planning.findMany({
-          where: { employee_id: { in: employeeIds }, ...dateCondition },
-          include: {
-            employee: { select: { matricule: true } },
-            annotation: true,
-          },
-          orderBy: { date: "asc" },
-        }),
-        // 🔥 NOUVEAU : Récupérer la date du TOUT PREMIER pointage
-        prisma.pointage.groupBy({
-          by: ["employee_id"],
-          _min: { date: true },
-          where: { employee_id: { in: employeeIds } },
-        }),
-      ],
+    // Filtrer la liste globale des annotations pour le rendu Excel
+    // afin de ne pas fausser la génération de colonnes
+    const filteredAnnotations = allAnnotations.filter((a: any) =>
+      employeeIds.includes(a.employee_id),
     );
+
+    // ── 5. Charger plannings BDD et ANCRE ABSOLUE ──
+    const [allPlannings, premiersPointages] = await Promise.all([
+      prisma.planning.findMany({
+        where: { employee_id: { in: employeeIds }, ...dateCondition },
+        include: {
+          employee: { select: { matricule: true } },
+          annotation: true,
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.pointage.groupBy({
+        by: ["employee_id"],
+        _min: { date: true },
+        where: { employee_id: { in: employeeIds } },
+      }),
+    ]);
 
     // ── Map d'ancrage des cycles (Date de référence absolue) ──
     const anchorMap = new Map<string, Date>();
@@ -288,7 +332,7 @@ export async function GET(request: NextRequest) {
       allPlannings.forEach((p: any) =>
         datesSet.add(p.date.toISOString().split("T")[0]),
       );
-      allAnnotations.forEach((a: any) =>
+      filteredAnnotations.forEach((a: any) =>
         datesSet.add(a.date.toISOString().split("T")[0]),
       );
       allPointages.forEach((p: any) =>
@@ -307,7 +351,7 @@ export async function GET(request: NextRequest) {
     );
 
     const annotMap = new Map<string, any>();
-    allAnnotations.forEach((a: any) =>
+    filteredAnnotations.forEach((a: any) =>
       annotMap.set(
         `${a.employee.matricule}_${a.date.toISOString().split("T")[0]}`,
         a,
@@ -330,12 +374,13 @@ export async function GET(request: NextRequest) {
 
     for (const emp of employees) {
       const jours: Record<string, string> = {};
-      const anchorDate = anchorMap.get(emp.id) || null; // 🔥 On récupère l'ancre
+      const anchorDate = anchorMap.get(emp.id) || null;
 
       const stats: Record<string, number> = {
         P: 0,
         A: 0,
         R: 0,
+        JF: 0, // 🔥 NOUVEAU
         M: 0,
         J: 0,
         Md: 0,
@@ -358,7 +403,6 @@ export async function GET(request: NextRequest) {
         const annot = annotMap.get(annotKey) ?? null;
         const hadPointage = presenceMap.has(presenceKey);
 
-        // 🔥 NOUVEAU : Intégration de la fin de nuit dans la logique globale
         const estFinNuit =
           finNuitMap.has(finNuitKey) || finNuitMap.has(veilleKey);
         const devraitRepos =
@@ -366,7 +410,7 @@ export async function GET(request: NextRequest) {
 
         let code = "";
 
-        // 1. PRIORITÉ ABSOLUE : Les annotations explicites (M, C, A, P...)
+        // 1. PRIORITÉ ABSOLUE : Les annotations explicites
         if (annot && ANNOT_CODES.has(annot.code)) {
           code = annot.code;
         }
@@ -380,15 +424,23 @@ export async function GET(request: NextRequest) {
             code = plan.statut;
           }
         }
-        // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles)
+        // 3. LOGIQUE AUTOMATIQUE (Badgeuse, Cycles & Jours Fériés)
         else if (estFinNuit) {
           code = "R";
         } else if (hadPointage) {
           code = "P";
         } else {
-          code = estJourRepos(new Date(dateStr), emp.cycles, anchorDate)
-            ? "R"
-            : "A";
+          // 🔥 NOUVELLE LOGIQUE JOURS FÉRIÉS
+          if (estJourRepos(new Date(dateStr), emp.cycles, anchorDate)) {
+            code = "R";
+          } else if (
+            emp.cycles?.type === "weekly" &&
+            verifierJourFerie(new Date(dateStr), allJoursFeries)
+          ) {
+            code = "JF";
+          } else {
+            code = "A";
+          }
         }
 
         jours[dateStr] = code;
@@ -397,29 +449,23 @@ export async function GET(request: NextRequest) {
         if (code === "P") {
           stats.P++;
           if (devraitRepos) stats.presences_supplementaires++;
-          // Si on force un P sans badgeage sur un jour travaillé
           if (!hadPointage && !devraitRepos) {
             stats.A++;
             stats.absences_annotees++;
           }
         } else if (code === "R") {
           stats.R++;
-          // Si on force un R sur un jour qui devait être travaillé (sans badgeage)
           if (!hadPointage && !devraitRepos) {
             stats.A++;
             stats.absences_annotees++;
           }
+        } else if (code === "JF") {
+          stats.JF++; // 🔥 NOUVEAU
         } else if (ANNOT_CODES.has(code)) {
-          // Pour les autres codes (M, C, J, etc.), on les compte comme présents justifiés
           stats.P++;
-
           if (code in stats) {
             stats[code as keyof typeof stats]++;
           }
-
-          // if (hadPointage) {
-          //   if (devraitRepos) stats.presences_supplementaires++;
-          // }else
           if (devraitRepos) {
             stats.presences_supplementaires++;
           } else {
@@ -427,7 +473,7 @@ export async function GET(request: NextRequest) {
             stats.absences_annotees++;
           }
         } else {
-          stats.A++;
+          stats.A++; // Les "A" par défaut
         }
       });
 
@@ -461,6 +507,8 @@ export async function GET(request: NextRequest) {
       "Déc",
     ];
     const daysLabel = ["Di", "Lu", "Ma", "Me", "Je", "Ve", "Sa"];
+
+    // 🔥 AJOUT DE LA COLONNE JOURS FÉRIÉS
     const STAT_COLS = [
       "Matricule",
       "Nom",
@@ -471,6 +519,7 @@ export async function GET(request: NextRequest) {
       "Présences",
       "Absences",
       "Repos",
+      "Jours Fériés", // <-- Ajout ici
       "Abs. nettes",
       "Abs. justif.",
       "Mission",
@@ -508,6 +557,7 @@ export async function GET(request: NextRequest) {
         row.stats.P,
         row.stats.A,
         row.stats.R,
+        row.stats.JF, // <-- Insertion de la donnée JF
         row.stats.absences_nettes,
         row.stats.absences_annotees,
         row.stats.M,
@@ -531,6 +581,7 @@ export async function GET(request: NextRequest) {
         "Présences",
         "Absences totales",
         "Repos",
+        "Jours Fériés", // <-- Ajout ici
         "Absences nettes",
         "Absences justifiées",
         "Mission (M)",
@@ -543,7 +594,7 @@ export async function GET(request: NextRequest) {
       ],
     ];
     rows.forEach((row) => {
-      const total = row.stats.P + row.stats.A + row.stats.R;
+      const total = row.stats.P + row.stats.A + row.stats.R + row.stats.JF; // On peut inclure JF dans le total si on veut, à voir selon tes règles RH
       recapSheet.push([
         row.matricule,
         row.nom,
@@ -554,6 +605,7 @@ export async function GET(request: NextRequest) {
         row.stats.P,
         row.stats.A,
         row.stats.R,
+        row.stats.JF, // <-- Insertion de la donnée JF
         row.stats.absences_nettes,
         row.stats.absences_annotees,
         row.stats.M,
@@ -570,6 +622,7 @@ export async function GET(request: NextRequest) {
     const ws1 = XLSX.utils.aoa_to_sheet(planningSheet);
     const ws2 = XLSX.utils.aoa_to_sheet(recapSheet);
 
+    // Ajustement des colonnes suite à l'ajout de Jours Fériés
     ws1["!cols"] = [
       { wch: 12 },
       { wch: 16 },
@@ -577,9 +630,10 @@ export async function GET(request: NextRequest) {
       { wch: 16 },
       { wch: 10 },
       { wch: 14 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 8 },
+      { wch: 8 }, // P
+      { wch: 8 }, // A
+      { wch: 8 }, // R
+      { wch: 10 }, // JF (Nouveau)
       { wch: 10 },
       { wch: 10 },
       { wch: 8 },
@@ -597,9 +651,10 @@ export async function GET(request: NextRequest) {
       { wch: 16 },
       { wch: 10 },
       { wch: 14 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 8 },
+      { wch: 10 }, // P
+      { wch: 14 }, // A
+      { wch: 8 }, // R
+      { wch: 12 }, // JF (Nouveau)
       { wch: 14 },
       { wch: 14 },
       { wch: 12 },
@@ -633,6 +688,47 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// 🔥 FONCTION POUR VÉRIFIER LES JOURS FÉRIÉS
+function verifierJourFerie(targetDate: Date, joursFeries: any[]): boolean {
+  if (!joursFeries || joursFeries.length === 0) return false;
+
+  const tDate = new Date(targetDate.toISOString().split("T")[0]);
+  const tTime = tDate.getTime();
+
+  for (const jf of joursFeries) {
+    const debut = new Date(jf.date_debut);
+    const fin = new Date(jf.date_fin);
+
+    if (jf.recurrent) {
+      const startRecurrent = new Date(debut);
+      startRecurrent.setFullYear(tDate.getFullYear());
+
+      const endRecurrent = new Date(fin);
+      endRecurrent.setFullYear(tDate.getFullYear());
+
+      const sTime = new Date(
+        startRecurrent.toISOString().split("T")[0],
+      ).getTime();
+      const eTime = new Date(
+        endRecurrent.toISOString().split("T")[0],
+      ).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    } else {
+      const sTime = new Date(debut.toISOString().split("T")[0]).getTime();
+      const eTime = new Date(fin.toISOString().split("T")[0]).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function getCycleLabel(cycle: any): string {
   if (!cycle) return "?";
   if (cycle.type === "weekly") {
@@ -649,7 +745,7 @@ function getCycleLabel(cycle: any): string {
   return "Inconnu";
 }
 
-// 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS (Comme les autres APIs) 🔥
+// 🔥 LOGIQUE ABSOLUE POUR LES ROTATIONS
 function estJourRepos(
   date: Date,
   cycle: any,

@@ -77,8 +77,7 @@ const RolesCell = ({ row }: any) => {
 
 const ImageCell = ({ row }: any) => {
   // Note: Utiliser l'accessorKey 'image_compressed' ou 'image' si l'API renvoie le champ différemment
-  console.log(row)
-  const preview =  row.original.image_compressed || row.original.image;
+  const preview = row.original.image_compressed || row.original.image;
   return preview ? (
     <MyImage
       image={preview}

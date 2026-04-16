@@ -291,7 +291,8 @@ model workspace {
   updated_at DateTime  @updatedAt
 
   // Relations
-  employees employee[]
+  employees  employee[]
+  jourFeries jour_ferie[]
 
   @@map("workspaces")
 }
@@ -317,4 +318,24 @@ model modification_history {
   @@index([employee_id])
   @@index([date])
   @@map("modification_history")
+}
+
+model jour_ferie {
+  id         String   @id @default(cuid())
+  nom        String // "عيد الفطر", "عيد الأضحى"...
+  date_debut DateTime // بداية العيد
+  date_fin   DateTime // نهاية العيد (نفس date_debut إذا يوم واحد)
+
+  workspace_id String?
+  workspace    workspace? @relation(fields: [workspace_id], references: [id])
+
+  recurrent   Boolean @default(false)
+  type        String? // 'national', 'religieux', 'regional'
+  description String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  created_by String?
+
+  @@map("jours_feries")
 }

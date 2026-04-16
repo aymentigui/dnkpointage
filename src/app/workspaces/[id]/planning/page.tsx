@@ -20,6 +20,7 @@ import {
 import { employeesApi, planningApi, exportApi } from '@/lib/api'
 import { downloadFile } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
+import { useSession } from '@/hooks/use-session'
 
 // ─────────────────────────────────────────────────────────────
 // Helpers de filtrage
@@ -98,6 +99,15 @@ export default function PlanningPage() {
     const [presenceFilter, setPresenceFilter] = useState<'all' | 'has' | 'none'>('all')
     const [cycleFilter, setCycleFilter] = useState<'all' | 'with_cycle' | 'without_cycle'>('all') // NOUVEAU FILTRE
     const [filtersExpanded, setFiltersExpanded] = useState(true)
+
+    // permission
+    const { session } = useSession();
+
+    const hasPermissionExportPointage = useMemo(() => (
+        session?.user?.is_admin ||
+        session?.user?.permissions.some((p: string) => p === "export_pointage")
+    ), [session]);
+
 
     // ── Load ──────────────────────────────────────────────────
     // Le chargement ne se fait que quand dateDebut/dateFin changent (via la recherche)
@@ -255,10 +265,12 @@ export default function PlanningPage() {
                         <ArrowLeft className="h-4 w-4 mr-2" />
                         Retour
                     </Button>
-                    <Button variant="outline" onClick={handleExport}>
-                        <Download className="h-4 w-4 mr-2" />
-                        Exporter
-                    </Button>
+                    {hasPermissionExportPointage && (
+                        <Button variant="outline" onClick={handleExport}>
+                            <Download className="h-4 w-4 mr-2" />
+                            Exporter
+                        </Button>
+                    )}
                 </div>
 
                 <h1 className="text-3xl font-bold flex items-center gap-2">

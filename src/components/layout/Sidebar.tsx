@@ -52,6 +52,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         { icon: Calendar, label: 'Planning', href: '/planning' },
         // { icon: BarChart3, label: 'Statistiques', href: '/stats' },
         { icon: FileText, label: 'Import/Export', href: '/import' },
+        { icon: Calendar, label: 'Jours Fériés', href: '/jours-feries' },
         { icon: History, label: 'Historique', href: '/history' },
         { icon: Settings, label: 'Paramètres', href: '/settings' },
     ]

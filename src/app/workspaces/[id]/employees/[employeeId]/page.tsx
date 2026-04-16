@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { employeesApi, planningApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import {
 import { CycleModal } from "@/components/modals/CycleModal";
 import { toast } from "react-hot-toast";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/hooks/use-session";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ const CELL_COLORS: Record<string, { bg: string; text: string; border: string }> 
     P: { bg: "#f0fdf4", text: "#15803d", border: "#bbf7d0" },
     A: { bg: "#fff1f2", text: "#be123c", border: "#fecdd3" },
     R: { bg: "#f8fafc", text: "#64748b", border: "#e2e8f0" },
+    JF: { bg: "#ecfeff", text: "#0369a1", border: "#cffafe" },
     M: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
     J: { bg: "#f0fdf4", text: "#059669", border: "#a7f3d0" },
     Md: { bg: "#fef2f2", text: "#dc2626", border: "#fecaca" },
@@ -241,11 +243,15 @@ function DayTooltip({ state }: { state: DayTooltipState }) {
 // ─── AnnotModal ───────────────────────────────────────────────
 
 function AnnotModal({
-    open, onOpenChange, matricule, id, dates, currentCode, currentStatut, onSuccess,
+    open, onOpenChange, matricule, id, dates, currentCode, currentStatut, onSuccess, permissions
 }: {
     open: boolean; onOpenChange: (v: boolean) => void;
     matricule: string; id: string; dates: string[];
     currentCode?: string; currentStatut?: string; onSuccess: () => void;
+    permissions: {
+        mission: boolean; justifie: boolean; maladie: boolean;
+        recuperation: boolean; conge: boolean; exceptionnel: boolean;
+    }
 }) {
     const [base, setBase] = useState("");
     const [annot, setAnnot] = useState("");
@@ -253,13 +259,26 @@ function AnnotModal({
     const [saving, setSaving] = useState(false);
     const isMulti = dates.length > 1;
 
+    // Filtrer les types d'annotations selon les permissions
+    const availableAnnotTypes = useMemo(() => {
+        return ANNOT_TYPES.filter(a => {
+            if (a.code === "M") return permissions.mission;
+            if (a.code === "J") return permissions.justifie;
+            if (a.code === "Md") return permissions.maladie;
+            if (a.code === "Rc") return permissions.recuperation;
+            if (a.code === "C") return permissions.conge;
+            if (a.code === "Ce") return permissions.exceptionnel;
+            return false;
+        });
+    }, [permissions]);
+
     useEffect(() => {
         if (!open) return;
         if (!isMulti && currentCode) { setAnnot(currentCode); setBase(currentStatut ?? "A"); }
         else if (!isMulti && currentStatut) { setBase(currentStatut); setAnnot(""); }
         else { setBase(""); setAnnot(""); }
         setDesc("");
-    }, [open]);
+    }, [open, isMulti, currentCode, currentStatut]);
 
     const pickBase = (c: string) => { setBase(c); if (c !== "A") setAnnot(""); };
     const pickAnnot = (c: string) => { setAnnot(a => a === c ? "" : c); setBase("A"); };
@@ -306,35 +325,39 @@ function AnnotModal({
                             })}
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex-1 h-px bg-slate-100" />
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">ou annotation</span>
-                        <div className="flex-1 h-px bg-slate-100" />
-                    </div>
-                    <div>
-                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">Annotation</p>
-                        <div className="grid grid-cols-2 gap-2">
-                            {ANNOT_TYPES.map(({ code, label, Icon, color, light, border }) => {
-                                const isOn = annot === code;
-                                return (
-                                    <button key={code} onClick={() => pickAnnot(code)}
-                                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all duration-150 text-left"
-                                        style={{ backgroundColor: isOn ? color : light, borderColor: isOn ? color : border }}>
-                                        <Icon className="w-4 h-4 shrink-0" style={{ color: isOn ? "#fff" : color }} />
-                                        <div>
-                                            <div className="text-[11px] font-bold font-mono leading-none" style={{ color: isOn ? "#fff" : color }}>{code}</div>
-                                            <div className="text-[11px] leading-tight mt-0.5" style={{ color: isOn ? "rgba(255,255,255,0.82)" : color }}>{label}</div>
-                                        </div>
-                                        {isOn && (
-                                            <div className="ml-auto w-4 h-4 rounded-full bg-white/20 flex items-center justify-center">
-                                                <div className="w-2 h-2 rounded-full bg-white" />
-                                            </div>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
+                    {availableAnnotTypes.length > 0 && (
+                        <>
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1 h-px bg-slate-100" />
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">ou annotation</span>
+                                <div className="flex-1 h-px bg-slate-100" />
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">Annotation</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {availableAnnotTypes.map(({ code, label, Icon, color, light, border }) => {
+                                        const isOn = annot === code;
+                                        return (
+                                            <button key={code} onClick={() => pickAnnot(code)}
+                                                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all duration-150 text-left"
+                                                style={{ backgroundColor: isOn ? color : light, borderColor: isOn ? color : border }}>
+                                                <Icon className="w-4 h-4 shrink-0" style={{ color: isOn ? "#fff" : color }} />
+                                                <div>
+                                                    <div className="text-[11px] font-bold font-mono leading-none" style={{ color: isOn ? "#fff" : color }}>{code}</div>
+                                                    <div className="text-[11px] leading-tight mt-0.5" style={{ color: isOn ? "rgba(255,255,255,0.82)" : color }}>{label}</div>
+                                                </div>
+                                                {isOn && (
+                                                    <div className="ml-auto w-4 h-4 rounded-full bg-white/20 flex items-center justify-center">
+                                                        <div className="w-2 h-2 rounded-full bg-white" />
+                                                    </div>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </>
+                    )}
                     {annot && (
                         <div>
                             <Label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -492,11 +515,17 @@ function HistoriqueGlobal({ entries }: { entries: HistoryEntry[] }) {
 
 function PlanningCalendar({
     jours, year, month, matricule, id, onMonthChange, onPlanningUpdated,
+    canUpdatePlanning, annotationPermissions
 }: {
     jours: JourPlanning[]; year: number; month: number;
     matricule: string; id: string;
     onMonthChange: (y: number, m: number) => void;
     onPlanningUpdated: () => void;
+    canUpdatePlanning: boolean;
+    annotationPermissions: {
+        mission: boolean; justifie: boolean; maladie: boolean;
+        recuperation: boolean; conge: boolean; exceptionnel: boolean;
+    }
 }) {
     const jourMap = new Map<string, JourPlanning>();
     jours.forEach(j => jourMap.set(j.date, j));
@@ -528,6 +557,9 @@ function PlanningCalendar({
     useEffect(() => { setSelected(new Set()); setLastClicked(null); }, [year, month]);
 
     const handleClick = (dateStr: string, e: React.MouseEvent) => {
+        // Bloquer le clique si l'utilisateur n'a pas la permission de modifier
+        if (!canUpdatePlanning) return;
+
         setTooltip(t => ({ ...t, visible: false }));
         if (e.shiftKey && lastClicked && allDates.includes(lastClicked)) {
             const a = allDates.indexOf(lastClicked), b = allDates.indexOf(dateStr);
@@ -579,7 +611,7 @@ function PlanningCalendar({
                 </button>
             </div>
 
-            {selected.size === 0 && (
+            {selected.size === 0 && canUpdatePlanning && (
                 <p className="text-[11px] text-slate-400 text-center pb-0.5">
                     Hover pour l'historique · Clic / Shift+clic pour modifier
                 </p>
@@ -605,10 +637,11 @@ function PlanningCalendar({
                         return (
                             <div key={dateStr} onClick={e => handleClick(dateStr, e)}
                                 className={cn(
-                                    "aspect-square rounded-lg flex items-center justify-center cursor-pointer",
+                                    "aspect-square rounded-lg flex items-center justify-center",
+                                    canUpdatePlanning ? "cursor-pointer" : "cursor-default",
                                     "border-2 transition-all duration-100 select-none",
                                     isSel ? "bg-slate-900 border-slate-900 ring-2 ring-slate-500 ring-offset-1"
-                                        : "bg-white border-slate-100 hover:border-slate-300",
+                                        : `bg-white border-slate-100 ${canUpdatePlanning ? "hover:border-slate-300" : ""}`,
                                     isToday && !isSel ? "ring-2 ring-offset-1 ring-slate-700" : ""
                                 )}>
                                 <span className={`text-[11px] font-medium ${isSel ? "text-slate-500" : "text-slate-300"}`}>{dayNum}</span>
@@ -627,10 +660,11 @@ function PlanningCalendar({
                                 onMouseEnter={e => handleMouseEnter(e, jour)}
                                 className={cn(
                                     "aspect-square rounded-lg flex flex-col items-center justify-center",
-                                    "cursor-pointer transition-all duration-100 border-2 select-none relative overflow-hidden",
+                                    canUpdatePlanning ? "cursor-pointer hover:scale-[1.03] hover:shadow-sm" : "cursor-default",
+                                    "transition-all duration-100 border-2 select-none relative overflow-hidden",
                                     isSel
                                         ? "ring-2 ring-slate-600 ring-offset-1 shadow-md scale-[1.06] z-10"
-                                        : "hover:scale-[1.03] hover:shadow-sm",
+                                        : "",
                                     isToday && !isSel ? "ring-2 ring-offset-1 ring-slate-700" : ""
                                 )}
                                 style={isSel
@@ -672,6 +706,7 @@ function PlanningCalendar({
                     { code: "P", label: "Présent" },
                     { code: "A", label: "Absent" },
                     { code: "R", label: "Repos" },
+                    { code: "JF", label: "Jour Férié" },
                 ].map(({ code, label }) => {
                     const c = getStatutColors(code);
                     return (
@@ -688,7 +723,7 @@ function PlanningCalendar({
             </div>
 
             {/* Floating bar */}
-            {selected.size > 0 && (
+            {selected.size > 0 && canUpdatePlanning && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-3 duration-200">
                     <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-white/15 flex items-center justify-center">
@@ -719,6 +754,7 @@ function PlanningCalendar({
                 currentCode={singleJour?.annotation?.code}
                 currentStatut={singleJour?.statut}
                 onSuccess={() => { clearSelection(); onPlanningUpdated(); }}
+                permissions={annotationPermissions}
             />
         </div>
     );
@@ -786,7 +822,86 @@ export default function EmployeeDetailPage() {
     const [loadingPlanning, setLoadingPlanning] = useState(true);
     const [loadingPointages, setLoadingPointages] = useState(true);
     const [cycleModalOpen, setCycleModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<"planning" | "pointages" | "historique">("planning");
+
+    // Tab management initialisé par défaut sur empty string jusqu'à chargement
+    const [activeTab, setActiveTab] = useState<"planning" | "pointages" | "historique" | "">("");
+
+    // permission
+    const { session } = useSession();
+
+    const hasPermissionAddAnnotationMission = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_mission")
+    ), [session]);
+
+    const hasPermissionAddAnnotationJustified = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_justified")
+    ), [session]);
+
+    const hasPermissionAddAnnotationMaladie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_maladie")
+    ), [session]);
+
+    const hasPermissionAddAnnotationRecuperation = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_recuperation")
+    ), [session]);
+
+    const hasPermissionAddAnnotationConge = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_conge")
+    ), [session]);
+
+    const hasPermissionAddAnnotationCongeExceptionnel = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_conge_exceptionnel")
+    ), [session]);
+
+    const hasPermissionUpdatePlanning = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "update_planning")
+    ), [session]);
+
+    const hasPermissionUpdateCycle = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "update_cycle")
+    ), [session]);
+
+    const hasPermissionViewPlanning = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_planning")
+    ), [session]);
+
+    const hasPermissionViewPointage = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_pointage")
+    ), [session]);
+
+    const hasPermissionViewHistorique = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_history")
+    ), [session]);
+
+    // Grouping annotations permissions to pass easily to children
+    const annotationPermissions = useMemo(() => ({
+        mission: hasPermissionAddAnnotationMission,
+        justifie: hasPermissionAddAnnotationJustified,
+        maladie: hasPermissionAddAnnotationMaladie,
+        recuperation: hasPermissionAddAnnotationRecuperation,
+        conge: hasPermissionAddAnnotationConge,
+        exceptionnel: hasPermissionAddAnnotationCongeExceptionnel,
+    }), [
+        hasPermissionAddAnnotationMission, hasPermissionAddAnnotationJustified,
+        hasPermissionAddAnnotationMaladie, hasPermissionAddAnnotationRecuperation,
+        hasPermissionAddAnnotationConge, hasPermissionAddAnnotationCongeExceptionnel
+    ]);
+
+    // Dynamically calculate available tabs based on view permissions
+    const availableTabs = useMemo(() => {
+        const tabs: Array<"planning" | "pointages" | "historique"> = [];
+        if (hasPermissionViewPlanning) tabs.push("planning");
+        if (hasPermissionViewPointage) tabs.push("pointages");
+        if (hasPermissionViewHistorique) tabs.push("historique");
+        return tabs;
+    }, [hasPermissionViewPlanning, hasPermissionViewPointage, hasPermissionViewHistorique]);
+
+    // Set a valid active tab if the current one is not allowed or empty
+    useEffect(() => {
+        if (availableTabs.length > 0 && (activeTab === "" || !availableTabs.includes(activeTab as any))) {
+            setActiveTab(availableTabs[0]);
+        }
+    }, [availableTabs, activeTab]);
 
     useEffect(() => {
         if (!id) return;
@@ -798,7 +913,7 @@ export default function EmployeeDetailPage() {
     }, [id]);
 
     const fetchPlanning = useCallback(() => {
-        if (!id) return;
+        if (!id || !hasPermissionViewPlanning) return;
         setLoadingPlanning(true);
         const debut = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-01`;
         const fin = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(getDaysInMonth(calYear, calMonth)).padStart(2, "0")}`;
@@ -809,18 +924,18 @@ export default function EmployeeDetailPage() {
             })
             .catch(console.error)
             .finally(() => setLoadingPlanning(false));
-    }, [id, calYear, calMonth]);
+    }, [id, calYear, calMonth, hasPermissionViewPlanning]);
 
     useEffect(() => { fetchPlanning(); }, [fetchPlanning]);
 
     const fetchPointages = useCallback((debut: string, fin: string) => {
-        if (!id) return;
+        if (!id || !hasPermissionViewPointage) return;
         setLoadingPointages(true);
         employeesApi.getPointages(id, { debut, fin })
             .then(r => { setPointages(r.data.pointages ?? []); setPointageResume(r.data.resume ?? null); })
             .catch(console.error)
             .finally(() => setLoadingPointages(false));
-    }, [id]);
+    }, [id, hasPermissionViewPointage]);
 
     useEffect(() => { fetchPointages(ptgDebut, ptgFin); }, [fetchPointages, ptgDebut, ptgFin]);
 
@@ -904,10 +1019,12 @@ export default function EmployeeDetailPage() {
                                         <Badge variant="outline" className="text-[10px] py-0 px-1.5 ml-1">Manuel</Badge>
                                     )}
                                 </div>
-                                <button onClick={() => setCycleModalOpen(true)}
-                                    className="text-xs text-slate-400 hover:text-slate-700 underline underline-offset-2 transition-colors">
-                                    Modifier
-                                </button>
+                                {hasPermissionUpdateCycle && (
+                                    <button onClick={() => setCycleModalOpen(true)}
+                                        className="text-xs text-slate-400 hover:text-slate-700 underline underline-offset-2 transition-colors">
+                                        Modifier
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -940,9 +1057,6 @@ export default function EmployeeDetailPage() {
                 ) : stats ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <StatCard icon={CheckCircle2} label="Présences" value={stats.presents} sub={`sur ${stats.total_jours} jours`} accent="bg-emerald-500" />
-                        {/* <StatCard icon={TrendingUp} label="Taux présence" value={`${stats.taux_presence}%`} sub="de jours ouvrés" accent="bg-blue-500" />
-                        <StatCard icon={Clock} label="Heures totales" value={stats.total_heures} sub={`moy. ${stats.moyenne_heures_jour}h/j`} accent="bg-violet-500" /> */}
-                        {/* <StatCard icon={XCircle} label="Absences" value={stats.absents} sub={`${stats.repos} jours de repos`} accent="bg-rose-500" /> */}
                     </div>
                 ) : null}
 
@@ -959,196 +1073,201 @@ export default function EmployeeDetailPage() {
                 )}
 
                 {/* Tabs */}
-                <div>
-                    <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit mb-5">
-                        {(["planning", "pointages", "historique"] as const).map(tab => (
-                            <button key={tab} onClick={() => setActiveTab(tab)}
-                                className={cn(
-                                    "px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150",
-                                    activeTab === tab ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
-                                )}>
-                                <span className="flex items-center gap-2">
-                                    {tab === "planning" && <><Calendar className="w-3.5 h-3.5" />Planning</>}
-                                    {tab === "pointages" && <><Clock className="w-3.5 h-3.5" />Pointages</>}
-                                    {tab === "historique" && (
-                                        <>
-                                            <History className="w-3.5 h-3.5" />
-                                            Historique
-                                            {historiqueGlobal.length > 0 && (
-                                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-100 text-orange-600 text-[9px] font-bold">
-                                                    {historiqueGlobal.length}
-                                                </span>
-                                            )}
-                                        </>
-                                    )}
-                                </span>
-                            </button>
-                        ))}
-                    </div>
+                {availableTabs.length > 0 && (
+                    <div>
+                        <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit mb-5">
+                            {availableTabs.map(tab => (
+                                <button key={tab} onClick={() => setActiveTab(tab)}
+                                    className={cn(
+                                        "px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                                        activeTab === tab ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
+                                    )}>
+                                    <span className="flex items-center gap-2">
+                                        {tab === "planning" && <><Calendar className="w-3.5 h-3.5" />Planning</>}
+                                        {tab === "pointages" && <><Clock className="w-3.5 h-3.5" />Pointages</>}
+                                        {tab === "historique" && (
+                                            <>
+                                                <History className="w-3.5 h-3.5" />
+                                                Historique
+                                                {historiqueGlobal.length > 0 && (
+                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-100 text-orange-600 text-[9px] font-bold">
+                                                        {historiqueGlobal.length}
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
 
-                    {/* ── Planning ── */}
-                    {activeTab === "planning" && (
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <Card className="lg:col-span-2 border-0 shadow-sm bg-white">
-                                <CardHeader className="pb-0 pt-5 px-5">
-                                    <CardTitle className="text-sm font-semibold text-slate-700">Calendrier mensuel</CardTitle>
+                        {/* ── Planning ── */}
+                        {activeTab === "planning" && hasPermissionViewPlanning && (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <Card className="lg:col-span-2 border-0 shadow-sm bg-white">
+                                    <CardHeader className="pb-0 pt-5 px-5">
+                                        <CardTitle className="text-sm font-semibold text-slate-700">Calendrier mensuel</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="p-5">
+                                        {loadingPlanning ? (
+                                            <div className="space-y-2">
+                                                <Skeleton className="h-6 w-32 mx-auto" />
+                                                <div className="grid grid-cols-7 gap-1">
+                                                    {Array(35).fill(0).map((_, i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <PlanningCalendar
+                                                jours={jours}
+                                                year={calYear}
+                                                month={calMonth}
+                                                id={id}
+                                                matricule={details?.matricule ?? ""}
+                                                onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
+                                                onPlanningUpdated={fetchPlanning}
+                                                canUpdatePlanning={hasPermissionUpdatePlanning}
+                                                annotationPermissions={annotationPermissions}
+                                            />
+                                        )}
+                                    </CardContent>
+                                </Card>
+
+                                {/* Résumé mensuel */}
+                                <Card className="border-0 shadow-sm bg-white">
+                                    <CardHeader className="pb-0 pt-5 px-5">
+                                        <CardTitle className="text-sm font-semibold text-slate-700">Résumé — {MOIS_FR[calMonth]}</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="p-5 space-y-4">
+                                        {loadingPlanning ? (
+                                            <div className="space-y-3">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}</div>
+                                        ) : (
+                                            <>
+                                                {[
+                                                    { code: "P", count: jours.filter(j => j.statut === "P").length },
+                                                    { code: "A", count: jours.filter(j => j.statut !== "P" && j.statut !== "R" && j.statut !== "JF").length },
+                                                    { code: "R", count: jours.filter(j => j.statut === "R").length },
+                                                    { code: "JF", count: jours.filter(j => j.statut === "JF").length },
+                                                ].filter(item => item.count > 0 || item.code !== "JF").map(({ code, count }) => {
+                                                    const c = getStatutColors(code);
+                                                    const pct = jours.length > 0 ? Math.round((count / jours.length) * 100) : 0;
+                                                    const lbl = code === "P" ? "Présent" : code === "R" ? "Repos" : code === "JF" ? "Jour Férié" : "Absent";
+                                                    return (
+                                                        <div key={code} className="p-3 rounded-xl border" style={{ backgroundColor: c.bg, borderColor: c.border }}>
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.text }} />
+                                                                    <span className="text-xs font-medium" style={{ color: c.text }}>{lbl}</span>
+                                                                </div>
+                                                                <span className="text-lg font-bold" style={{ color: c.text }}>{count}</span>
+                                                            </div>
+                                                            <div className="w-full bg-white rounded-full h-1.5">
+                                                                <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: c.text }} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* Annotations du mois */}
+                                                {jours.some(j => j.annotation) && (
+                                                    <div className="pt-2 border-t border-slate-100">
+                                                        <p className="text-xs font-medium text-slate-500 mb-2">Annotations du mois</p>
+                                                        <div className="space-y-1.5">
+                                                            {jours.filter(j => j.annotation).map((j, i) => (
+                                                                <div key={i} className="flex items-center gap-2 text-xs">
+                                                                    <span className="text-slate-400 font-mono w-14 shrink-0">
+                                                                        {new Date(j.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                                                                    </span>
+                                                                    <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-mono font-bold text-[10px]">
+                                                                        {j.annotation!.code}
+                                                                    </span>
+                                                                    <span className="text-slate-500 truncate">{j.annotation!.libelle}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+
+                        {/* ── Pointages ── */}
+                        {activeTab === "pointages" && hasPermissionViewPointage && (
+                            <div className="space-y-4">
+                                <DateFilterBar debut={ptgDebut} fin={ptgFin} onApply={(d, f) => { setPtgDebut(d); setPtgFin(f); }} />
+                                {pointageResume && (
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                        {[
+                                            { label: "Total", value: pointageResume.total, color: "text-slate-800" },
+                                            { label: "Complets", value: pointageResume.complets, color: "text-emerald-600" },
+                                            { label: "Incomplets", value: pointageResume.incomplets, color: "text-amber-600" },
+                                            { label: "Suspects", value: pointageResume.suspects, color: "text-rose-600" },
+                                            { label: "Heures", value: pointageResume.total_heures, color: "text-violet-600" },
+                                        ].map(({ label, value, color }) => (
+                                            <div key={label} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm text-center">
+                                                <div className={`text-xl font-bold ${color}`}>{value}</div>
+                                                <div className="text-[10px] text-slate-400 uppercase tracking-wide mt-0.5">{label}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <Card className="border-0 shadow-sm bg-white">
+                                    <CardHeader className="pb-0 pt-5 px-5">
+                                        <CardTitle className="text-sm font-semibold text-slate-700">Détail — {ptgDebut} → {ptgFin}</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="p-3">
+                                        {loadingPointages ? (
+                                            <div className="space-y-1">{Array(8).fill(0).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
+                                        ) : pointages.length === 0 ? (
+                                            <div className="text-center py-12 text-slate-400">
+                                                <Coffee className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                                                <p className="text-sm">Aucun pointage sur cette période</p>
+                                            </div>
+                                        ) : (
+                                            <div className="divide-y divide-slate-50">
+                                                <div className="flex items-center gap-4 px-4 pb-2">
+                                                    <div className="w-16 shrink-0" />
+                                                    <div className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Horaires</div>
+                                                    <div className="w-20 text-right shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Durée</div>
+                                                    <div className="w-24 text-right shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Qualité</div>
+                                                </div>
+                                                {pointages.map(p => <PointageRow key={p.id} p={p} />)}
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+
+                        {/* ── Historique global ── */}
+                        {activeTab === "historique" && hasPermissionViewHistorique && (
+                            <Card className="border-0 shadow-sm bg-white">
+                                <CardHeader className="pt-5 px-5 pb-0">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                                            <History className="w-4 h-4" />
+                                            Toutes les modifications
+                                        </CardTitle>
+                                        <span className="text-xs text-slate-400">
+                                            {historiqueGlobal.length} entrée{historiqueGlobal.length > 1 ? "s" : ""}
+                                        </span>
+                                    </div>
                                 </CardHeader>
                                 <CardContent className="p-5">
                                     {loadingPlanning ? (
                                         <div className="space-y-2">
-                                            <Skeleton className="h-6 w-32 mx-auto" />
-                                            <div className="grid grid-cols-7 gap-1">
-                                                {Array(35).fill(0).map((_, i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}
-                                            </div>
+                                            {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}
                                         </div>
                                     ) : (
-                                        <PlanningCalendar
-                                            jours={jours}
-                                            year={calYear}
-                                            month={calMonth}
-                                            id={id}
-                                            matricule={details?.matricule ?? ""}
-                                            onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
-                                            onPlanningUpdated={fetchPlanning}
-                                        />
+                                        <HistoriqueGlobal entries={historiqueGlobal} />
                                     )}
                                 </CardContent>
                             </Card>
-
-                            {/* Résumé mensuel */}
-                            <Card className="border-0 shadow-sm bg-white">
-                                <CardHeader className="pb-0 pt-5 px-5">
-                                    <CardTitle className="text-sm font-semibold text-slate-700">Résumé — {MOIS_FR[calMonth]}</CardTitle>
-                                </CardHeader>
-                                <CardContent className="p-5 space-y-4">
-                                    {loadingPlanning ? (
-                                        <div className="space-y-3">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}</div>
-                                    ) : (
-                                        <>
-                                            {[
-                                                { code: "P", count: jours.filter(j => j.statut === "P").length },
-                                                { code: "A", count: jours.filter(j => j.statut !== "P" && j.statut !== "R").length },
-                                                { code: "R", count: jours.filter(j => j.statut === "R").length },
-                                            ].map(({ code, count }) => {
-                                                const c = getStatutColors(code);
-                                                const pct = jours.length > 0 ? Math.round((count / jours.length) * 100) : 0;
-                                                const lbl = code === "P" ? "Présent" : code === "R" ? "Repos" : "Absent";
-                                                return (
-                                                    <div key={code} className="p-3 rounded-xl border" style={{ backgroundColor: c.bg, borderColor: c.border }}>
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.text }} />
-                                                                <span className="text-xs font-medium" style={{ color: c.text }}>{lbl}</span>
-                                                            </div>
-                                                            <span className="text-lg font-bold" style={{ color: c.text }}>{count}</span>
-                                                        </div>
-                                                        <div className="w-full bg-white rounded-full h-1.5">
-                                                            <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: c.text }} />
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-
-                                            {/* Annotations du mois */}
-                                            {jours.some(j => j.annotation) && (
-                                                <div className="pt-2 border-t border-slate-100">
-                                                    <p className="text-xs font-medium text-slate-500 mb-2">Annotations du mois</p>
-                                                    <div className="space-y-1.5">
-                                                        {jours.filter(j => j.annotation).map((j, i) => (
-                                                            <div key={i} className="flex items-center gap-2 text-xs">
-                                                                <span className="text-slate-400 font-mono w-14 shrink-0">
-                                                                    {new Date(j.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                                                                </span>
-                                                                <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-mono font-bold text-[10px]">
-                                                                    {j.annotation!.code}
-                                                                </span>
-                                                                <span className="text-slate-500 truncate">{j.annotation!.libelle}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        </div>
-                    )}
-
-                    {/* ── Pointages ── */}
-                    {activeTab === "pointages" && (
-                        <div className="space-y-4">
-                            <DateFilterBar debut={ptgDebut} fin={ptgFin} onApply={(d, f) => { setPtgDebut(d); setPtgFin(f); }} />
-                            {pointageResume && (
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                    {[
-                                        { label: "Total", value: pointageResume.total, color: "text-slate-800" },
-                                        { label: "Complets", value: pointageResume.complets, color: "text-emerald-600" },
-                                        { label: "Incomplets", value: pointageResume.incomplets, color: "text-amber-600" },
-                                        { label: "Suspects", value: pointageResume.suspects, color: "text-rose-600" },
-                                        { label: "Heures", value: pointageResume.total_heures, color: "text-violet-600" },
-                                    ].map(({ label, value, color }) => (
-                                        <div key={label} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm text-center">
-                                            <div className={`text-xl font-bold ${color}`}>{value}</div>
-                                            <div className="text-[10px] text-slate-400 uppercase tracking-wide mt-0.5">{label}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                            <Card className="border-0 shadow-sm bg-white">
-                                <CardHeader className="pb-0 pt-5 px-5">
-                                    <CardTitle className="text-sm font-semibold text-slate-700">Détail — {ptgDebut} → {ptgFin}</CardTitle>
-                                </CardHeader>
-                                <CardContent className="p-3">
-                                    {loadingPointages ? (
-                                        <div className="space-y-1">{Array(8).fill(0).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
-                                    ) : pointages.length === 0 ? (
-                                        <div className="text-center py-12 text-slate-400">
-                                            <Coffee className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                                            <p className="text-sm">Aucun pointage sur cette période</p>
-                                        </div>
-                                    ) : (
-                                        <div className="divide-y divide-slate-50">
-                                            <div className="flex items-center gap-4 px-4 pb-2">
-                                                <div className="w-16 shrink-0" />
-                                                <div className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Horaires</div>
-                                                <div className="w-20 text-right shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Durée</div>
-                                                <div className="w-24 text-right shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Qualité</div>
-                                            </div>
-                                            {pointages.map(p => <PointageRow key={p.id} p={p} />)}
-                                        </div>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        </div>
-                    )}
-
-                    {/* ── Historique global ── */}
-                    {activeTab === "historique" && (
-                        <Card className="border-0 shadow-sm bg-white">
-                            <CardHeader className="pt-5 px-5 pb-0">
-                                <div className="flex items-center justify-between">
-                                    <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                                        <History className="w-4 h-4" />
-                                        Toutes les modifications
-                                    </CardTitle>
-                                    <span className="text-xs text-slate-400">
-                                        {historiqueGlobal.length} entrée{historiqueGlobal.length > 1 ? "s" : ""}
-                                    </span>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="p-5">
-                                {loadingPlanning ? (
-                                    <div className="space-y-2">
-                                        {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}
-                                    </div>
-                                ) : (
-                                    <HistoriqueGlobal entries={historiqueGlobal} />
-                                )}
-                            </CardContent>
-                        </Card>
-                    )}
-                </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );

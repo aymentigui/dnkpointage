@@ -9,10 +9,45 @@ export const permissions = [
   { name: "roles_view", group: "roles" },
   { name: "roles_create", group: "roles" },
   { name: "roles_update", group: "roles" },
-  { name: "roles_delete", group: "roles" }, 
+  { name: "roles_delete", group: "roles" },
 
   { name: "files_view", group: "files" },
   { name: "files_create", group: "files" },
   { name: "files_update", group: "files" },
   { name: "files_delete", group: "files" },
+
+  { name: "add_annotation_mission", group: "annotation" },
+  { name: "add_annotation_justified", group: "annotation" },
+  { name: "add_annotation_maladie", group: "annotation" },
+  { name: "add_annotation_recuperation", group: "annotation" },
+  { name: "add_annotation_conge", group: "annotation" },
+  { name: "add_annotation_conge_exceptionnel", group: "annotation" },
+
+  { name: "add_employe", group: "employe" },
+  { name: "update_employe", group: "employe" },
+  { name: "delete_employe", group: "employe" },
+  { name: "view_employe", group: "employe" },
+  { name: "import_employe", group: "employe" },
+  { name: "export_employe", group: "employe" },
+
+  { name: "add_pointage", group: "pointage" },
+  { name: "update_pointage", group: "pointage" },
+  { name: "delete_pointage", group: "pointage" },
+  { name: "view_pointage", group: "pointage" },
+  { name: "import_pointage", group: "pointage" },
+  { name: "export_pointage", group: "pointage" },
+
+  { name: "view_history", group: "history" },
+  { name: "export_history", group: "history" },
+
+  { name: "add_jour_ferie", group: "jour_ferie" },
+  { name: "update_jour_ferie", group: "jour_ferie" },
+  { name: "delete_jour_ferie", group: "jour_ferie" },
+  { name: "view_jour_ferie", group: "jour_ferie" },
+
+  { name: "update_cycle", group: "cycle" },
+  { name: "view_cycle", group: "cycle" },
+
+  { name: "update_planning", group: "planning" },
+  { name: "view_planning", group: "planning" },
 ];

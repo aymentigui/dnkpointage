@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API_URL = "http://10.0.10.1:3000/api";
-// const API_URL = "http://localhost:3000/api";
+//const API_URL = "http://localhost:3000/api";
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -204,4 +204,12 @@ export const employeesApi = {
 
   // ── Supprimer plusieurs ────────────────────────────────────
   deleteMany: (ids: string[]) => api.delete("/employees", { data: { ids } }),
+};
+
+export const joursFeriesApi = {
+  getAll: (params?: any) => api.get("/jours-feries", { params }),
+  get: (id: string) => api.get(`/jours-feries/${id}`),
+  create: (data: any) => api.post("/jours-feries", data),
+  update: (id: string, data: any) => api.put(`/jours-feries/${id}`, data),
+  delete: (id: string) => api.delete(`/jours-feries/${id}`),
 };

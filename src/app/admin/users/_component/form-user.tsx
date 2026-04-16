@@ -97,7 +97,6 @@ export const AddUpdateUser = ({ user }: any) => {
             form.setValue("is_admin", user.is_admin ?? false);
             form.setValue("roles", roles.filter((role) => user.roles.includes(role.name)).map((role) => role.id));
             setImage(user.image ?? null);
-            console.log(user)
         }
     }, [user])
 

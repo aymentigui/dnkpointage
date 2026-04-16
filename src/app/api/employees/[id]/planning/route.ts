@@ -1,8 +1,8 @@
 // app/api/employees/[id]/planning/route.ts
 //
 // GET retourne pour chaque jour :
-//   - statut          : code affiché (P, A, R, M, J, Md, Rc, C, Ce)
-//   - statut_original : statut calculé depuis pointages/cycle (avant toute modif manuelle)
+//   - statut          : code affiché (P, A, R, M, J, Md, Rc, C, Ce, JF)
+//   - statut_original : statut calculé depuis pointages/cycle/JF (avant toute modif manuelle)
 //   - history[]       : liste des modifications manuelles (ancien→nouveau, qui, quand)
 //   - annotation      : { code, libelle } si présente
 //   - source          : "calcule" | "bdd"
@@ -56,53 +56,66 @@ export async function GET(request: NextRequest, { params }: any) {
     }
 
     // ── Fetch en parallèle ────────────────────────────────────
-    const [plannings, annotations, pointages, histories, premierPointage] =
-      await Promise.all([
-        prisma.planning.findMany({
-          where: { employee_id: id, ...dateCondition },
-          include: { annotation: true },
-          orderBy: { date: "asc" },
-        }),
+    const [
+      plannings,
+      annotations,
+      pointages,
+      histories,
+      premierPointage,
+      allJoursFeries,
+    ] = await Promise.all([
+      prisma.planning.findMany({
+        where: { employee_id: id, ...dateCondition },
+        include: { annotation: true },
+        orderBy: { date: "asc" },
+      }),
 
-        prisma.annotation.findMany({
-          where: { employee_id: id, ...dateCondition },
-          orderBy: { date: "asc" },
-        }),
+      prisma.annotation.findMany({
+        where: { employee_id: id, ...dateCondition },
+        orderBy: { date: "asc" },
+      }),
 
-        // J-1 pour capter les nuits commençant la veille
-        prisma.pointage.findMany({
-          where: {
-            employee_id: id,
-            ...(dateDebut && dateFin
-              ? {
-                  date: {
-                    gte: new Date(new Date(dateDebut).getTime() - 86400000),
-                    lte: new Date(dateFin),
-                  },
-                }
-              : {}),
-          },
-          select: {
-            date: true,
-            heure_entree: true,
-            heure_sortie: true,
-            est_nuit: true,
-          },
-          orderBy: { date: "asc" },
-        }),
+      // J-1 pour capter les nuits commençant la veille
+      prisma.pointage.findMany({
+        where: {
+          employee_id: id,
+          ...(dateDebut && dateFin
+            ? {
+                date: {
+                  gte: new Date(new Date(dateDebut).getTime() - 86400000),
+                  lte: new Date(dateFin),
+                },
+              }
+            : {}),
+        },
+        select: {
+          date: true,
+          heure_entree: true,
+          heure_sortie: true,
+          est_nuit: true,
+        },
+        orderBy: { date: "asc" },
+      }),
 
-        // Historique des modifications pour la période
-        prisma.modification_history.findMany({
-          where: { employee_id: id, ...dateCondition },
-          orderBy: { created_at: "asc" },
-        }),
+      // Historique des modifications pour la période
+      prisma.modification_history.findMany({
+        where: { employee_id: id, ...dateCondition },
+        orderBy: { created_at: "asc" },
+      }),
 
-        // Récupérer la date du TOUT PREMIER pointage pour l'ancrage absolu
-        prisma.pointage.aggregate({
-          where: { employee_id: id },
-          _min: { date: true },
-        }),
-      ]);
+      // Récupérer la date du TOUT PREMIER pointage pour l'ancrage absolu
+      prisma.pointage.aggregate({
+        where: { employee_id: id },
+        _min: { date: true },
+      }),
+
+      // 🔥 NOUVEAU : Récupération des jours fériés du workspace de l'employé
+      prisma.jour_ferie.findMany({
+        where: {
+          OR: [{ workspace_id: employee.workspace_id }, { workspace_id: null }],
+        },
+      }),
+    ]);
 
     // 🔥 Sécurisation : L'ancre pour aligner la rotation
     const anchorDate = premierPointage?._min?.date || null;
@@ -278,12 +291,16 @@ export async function GET(request: NextRequest, { params }: any) {
       const annot = annotMap.get(dateStr) ?? null;
       const history = historyByDate.get(dateStr) ?? [];
 
-      // ── Statut original (strictement badgeuse + cycle, sans modif) ────
+      // ── Statut original (strictement badgeuse + cycle + Jours Fériés, sans modif) ────
       const statutOriginal = (() => {
         if (finNuitMap.has(dateStr)) return "R";
         if (finNuitMap.has(veilleDateStr)) return "R";
         if (presenceMap.has(dateStr)) return "P";
-        return estJourRepos(date, cycle, anchorDate) ? "R" : "A";
+        if (estJourRepos(date, cycle, anchorDate)) return "R";
+        // 🔥 NOUVEAU : Application de la logique JF ici aussi
+        if (cycle?.type === "weekly" && verifierJourFerie(date, allJoursFeries))
+          return "JF";
+        return "A";
       })();
 
       // ── Statut final (avec application stricte des priorités) ──────────
@@ -318,7 +335,7 @@ export async function GET(request: NextRequest, { params }: any) {
           statut = plan.statut;
         }
       }
-      // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles - on récupère le statut original)
+      // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles & JF)
       else {
         statut = statutOriginal;
       }
@@ -458,6 +475,47 @@ export async function POST(request: NextRequest, { params }: any) {
       { status: 500 },
     );
   }
+}
+
+// 🔥 FONCTION POUR VÉRIFIER LES JOURS FÉRIÉS 🔥
+function verifierJourFerie(targetDate: Date, joursFeries: any[]): boolean {
+  if (!joursFeries || joursFeries.length === 0) return false;
+
+  const tDate = new Date(targetDate.toISOString().split("T")[0]);
+  const tTime = tDate.getTime();
+
+  for (const jf of joursFeries) {
+    const debut = new Date(jf.date_debut);
+    const fin = new Date(jf.date_fin);
+
+    if (jf.recurrent) {
+      const startRecurrent = new Date(debut);
+      startRecurrent.setFullYear(tDate.getFullYear());
+
+      const endRecurrent = new Date(fin);
+      endRecurrent.setFullYear(tDate.getFullYear());
+
+      const sTime = new Date(
+        startRecurrent.toISOString().split("T")[0],
+      ).getTime();
+      const eTime = new Date(
+        endRecurrent.toISOString().split("T")[0],
+      ).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    } else {
+      const sTime = new Date(debut.toISOString().split("T")[0]).getTime();
+      const eTime = new Date(fin.toISOString().split("T")[0]).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS 🔥

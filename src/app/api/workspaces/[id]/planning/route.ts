@@ -52,6 +52,7 @@ export async function GET(request: NextRequest, { params }: any) {
       allPlannings,
       allHistories,
       premiersPointages,
+      allJoursFeries, // 🔥 NOUVEAU : Fetch des jours fériés
     ] = await Promise.all([
       prisma.annotation.findMany({
         where: { employee_id: { in: employeeIds }, ...dateCondition },
@@ -94,11 +95,21 @@ export async function GET(request: NextRequest, { params }: any) {
         orderBy: { created_at: "asc" },
       }),
 
-      // 🔥 NOUVEAU : Récupérer la date du TOUT PREMIER pointage par employé pour l'ancrage
+      // Récupérer la date du TOUT PREMIER pointage par employé pour l'ancrage
       prisma.pointage.groupBy({
         by: ["employee_id"],
         _min: { date: true },
         where: { employee_id: { in: employeeIds } },
+      }),
+
+      // 🔥 NOUVEAU : Récupération des jours fériés du workspace
+      prisma.jour_ferie.findMany({
+        where: {
+          OR: [
+            { workspace_id: workspaceId },
+            { workspace_id: null }, // Au cas où tu as des jours fériés globaux
+          ],
+        },
       }),
     ]);
 
@@ -285,7 +296,7 @@ export async function GET(request: NextRequest, { params }: any) {
     // ── Construire les plannings ──────────────────────────────
     for (const emp of employees) {
       const cycle = emp.cycles ?? null;
-      const anchorDate = anchorMap.get(emp.id) || null; // 🔥 On récupère la date d'ancrage
+      const anchorDate = anchorMap.get(emp.id) || null;
 
       for (const element of toutesLesDates) {
         const dateStr = element;
@@ -340,14 +351,23 @@ export async function GET(request: NextRequest, { params }: any) {
             annotation_id = plan.annotation_id;
           }
         }
-        // 3. LOGIQUE AUTOMATIQUE (Badgeuse & Cycles)
+        // 3. LOGIQUE AUTOMATIQUE (Badgeuse, Cycles & Jours Fériés)
         else if (finNuitMap.has(finNuitKey) || finNuitMap.has(veilleFinKey)) {
           statut = "R";
         } else if (presenceMap.has(presenceKey)) {
           statut = "P";
         } else {
-          // S'il n'y a pas de badgeage ni d'annotation, on vérifie si c'est un jour de repos
-          statut = estJourRepos(date, cycle, anchorDate) ? "R" : "A";
+          // 🔥 NOUVEAU : On check d'abord le repos, ensuite le Jour Férié, sinon Absence
+          if (estJourRepos(date, cycle, anchorDate)) {
+            statut = "R";
+          } else if (
+            cycle?.type === "weekly" &&
+            verifierJourFerie(date, allJoursFeries)
+          ) {
+            statut = "JF"; // C'est un weekly et on tombe sur un jour férié sans badgeage
+          } else {
+            statut = "A";
+          }
         }
 
         // Ajout final au tableau des plannings
@@ -361,7 +381,14 @@ export async function GET(request: NextRequest, { params }: any) {
             if (finNuitMap.has(finNuitKey)) return "R";
             if (finNuitMap.has(veilleFinKey)) return "R";
             if (presenceMap.has(presenceKey)) return "P";
-            return estJourRepos(date, cycle, anchorDate) ? "R" : "A";
+            if (estJourRepos(date, cycle, anchorDate)) return "R";
+            // 🔥 Statut original prend en compte le JF
+            if (
+              cycle?.type === "weekly" &&
+              verifierJourFerie(date, allJoursFeries)
+            )
+              return "JF";
+            return "A";
           })(),
         });
       }
@@ -375,43 +402,41 @@ export async function GET(request: NextRequest, { params }: any) {
 
       let presents = 0,
         absences = 0,
-        absences_annotees = 0;
-      let repos = 0,
-        presences_supplementaires = 0;
+        absences_annotees = 0,
+        repos = 0,
+        presences_supplementaires = 0,
+        jours_feries = 0; // 🔥 NOUVEAU: Compteur pour JF
 
       empData.plannings.forEach((p: any) => {
         const dateStr = new Date(p.date).toISOString().split("T")[0];
         const statut = p.statut;
 
         const hadPointage = presenceMap.has(`${emp.id}_${dateStr}`);
-
-        // 🔥 NOUVEAU : Récupérer l'information de fin de nuit pour les stats
         const veilleDateStr = decalerJour(dateStr, -1);
         const estFinNuit =
           finNuitMap.has(`${emp.id}_${dateStr}`) ||
           finNuitMap.has(`${emp.id}_${veilleDateStr}`);
 
-        // 🔥 CORRECTION : Un employé "devrait" être en repos si c'est son cycle OU si c'est une fin de nuit
         const devraitR =
           estJourRepos(new Date(dateStr), cycle, anchorDate) || estFinNuit;
 
         if (statut === "P") {
           presents++;
           if (devraitR) presences_supplementaires++;
-          // ida kan absent mais radinah p donc absences++ et absences_annotees++
           if (!hadPointage && !devraitR) {
             absences++;
             absences_annotees++;
           }
         } else if (statut === "R") {
           repos++;
-          // ida kan absent mais radinah R donc absences++ et absences_annotees++
           if (!hadPointage && !devraitR) {
             absences++;
             absences_annotees++;
           }
+        } else if (statut === "JF") {
+          jours_feries++; // 🔥 On incrémente le JF sans pénaliser les absences
         } else if (ANNOT_CODES.has(statut)) {
-          presents++; // Remarque: selon ta règle, une annotation M/C compte comme présent dans le total "presents"
+          presents++;
           if (hadPointage) {
             if (devraitR) presences_supplementaires++;
           } else if (devraitR) {
@@ -421,7 +446,7 @@ export async function GET(request: NextRequest, { params }: any) {
             absences_annotees++;
           }
         } else {
-          absences++;
+          absences++; // Le "A" par défaut tombe ici
         }
       });
 
@@ -431,6 +456,7 @@ export async function GET(request: NextRequest, { params }: any) {
         absences_nettes: absences,
         absences_annotees,
         repos,
+        jours_feries, // 🔥 Retourné dans l'objet des stats
         presences_supplementaires,
         total: empData.plannings.length,
       };
@@ -446,7 +472,51 @@ export async function GET(request: NextRequest, { params }: any) {
   }
 }
 
-// 🔥 NOUVELLE LOGIQUE ABSOLUE POUR LES ROTATIONS 🔥
+// 🔥 FONCTION POUR VÉRIFIER LES JOURS FÉRIÉS 🔥
+function verifierJourFerie(targetDate: Date, joursFeries: any[]): boolean {
+  if (!joursFeries || joursFeries.length === 0) return false;
+
+  // On normalise la date cible pour ne garder que la journée (ignorer l'heure)
+  const tDate = new Date(targetDate.toISOString().split("T")[0]);
+  const tTime = tDate.getTime();
+
+  for (const jf of joursFeries) {
+    const debut = new Date(jf.date_debut);
+    const fin = new Date(jf.date_fin);
+
+    if (jf.recurrent) {
+      // Si c'est récurrent, on transpose les dates de début/fin à l'année de la date cible
+      const startRecurrent = new Date(debut);
+      startRecurrent.setFullYear(tDate.getFullYear());
+
+      const endRecurrent = new Date(fin);
+      endRecurrent.setFullYear(tDate.getFullYear());
+
+      const sTime = new Date(
+        startRecurrent.toISOString().split("T")[0],
+      ).getTime();
+      const eTime = new Date(
+        endRecurrent.toISOString().split("T")[0],
+      ).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    } else {
+      // Pas récurrent : on compare simplement les timestamps sans les heures
+      const sTime = new Date(debut.toISOString().split("T")[0]).getTime();
+      const eTime = new Date(fin.toISOString().split("T")[0]).getTime();
+
+      if (tTime >= sTime && tTime <= eTime) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// 🔥 LOGIQUE ABSOLUE POUR LES ROTATIONS 🔥
 function estJourRepos(
   date: Date,
   cycle: any,
