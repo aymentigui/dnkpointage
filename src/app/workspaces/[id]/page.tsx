@@ -339,7 +339,7 @@ export default function WorkspaceDetailPage() {
                                             <CardContent className="flex flex-col items-center py-6">
                                                 <Users className="h-12 w-12 mb-2 text-primary" />
                                                 <p className="font-medium">Base personnel</p>
-                                                <p className="text-xs text-muted-foreground">Excel (Matricule, Nom, Prénom, Poste, Zone)</p>
+                                                <p className="text-xs text-muted-foreground">Excel (Matricule, Nom, Prénom, Poste, Zone, Departement)</p>
                                             </CardContent>
                                         </Card>
                                     </Link>

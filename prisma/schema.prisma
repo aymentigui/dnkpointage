@@ -43,10 +43,12 @@ model user {
   // Optional for WebAuthn support
   // Authenticator                 Authenticator[]
 
-  created_at DateTime  @default(now())
-  deleted_at DateTime?
-  updated_at DateTime  @updatedAt
-  Account    account[]
+  created_at              DateTime                   @default(now())
+  deleted_at              DateTime?
+  updated_at              DateTime                   @updatedAt
+  Account                 account[]
+  userManagedDepartmenets user_managed_departmenet[]
+  userManagedEmployees    user_managed_employee[]
 }
 
 model session {
@@ -66,7 +68,7 @@ model session {
 model role {
   id          String     @id @default(cuid())
   name        String     @unique
-  permissions String
+  permissions String     @db.Text
   users       userrole[]
   public      Boolean    @default(true)
 }
@@ -157,14 +159,17 @@ model files {
 }
 
 model employee {
-  id           String     @id @default(cuid())
-  matricule    String
-  nom          String?
-  prenom       String?
-  poste        String?
-  zone         String?
-  workspace_id String?
-  workspace    workspace? @relation(fields: [workspace_id], references: [id])
+  id             String       @id @default(cuid())
+  matricule      String
+  nom            String?
+  prenom         String?
+  poste          String?
+  active         Boolean      @default(true)
+  zone           String?
+  workspace_id   String?
+  workspace      workspace?   @relation(fields: [workspace_id], references: [id])
+  departmenet_id String?
+  departmenet    departmenet? @relation(fields: [departmenet_id], references: [id])
 
   // Relations
   pointages   pointage[]
@@ -173,12 +178,51 @@ model employee {
   cycles      cycle? // Relation 1-1 avec le cycle de travail
 
   // Métadonnées
-  created_at             DateTime               @default(now())
-  updated_at             DateTime               @updatedAt
+  created_at             DateTime                @default(now())
+  updated_at             DateTime                @updatedAt
   modification_histories modification_history[]
+  zoneEmployes           zone_employe[]
+  missions               mission[]
+  userManagedEmployees   user_managed_employee[]
+  sorties                sortie[]
+  maladies               maladie[]
 
   @@index([matricule])
   @@map("employees")
+}
+
+model zone {
+  id           String     @id @default(cuid())
+  name         String
+  workspace_id String?
+  workspace    workspace? @relation(fields: [workspace_id], references: [id])
+
+  created_at   DateTime       @default(now())
+  updated_at   DateTime       @updatedAt
+  zoneEmployes zone_employe[]
+}
+
+model zone_employe {
+  id          String   @id @default(cuid())
+  zone_id     String
+  zone        zone     @relation(fields: [zone_id], references: [id])
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model departmenet {
+  id           String     @id @default(cuid())
+  name         String
+  workspace_id String?
+  workspace    workspace? @relation(fields: [workspace_id], references: [id])
+
+  created_at              DateTime                   @default(now())
+  updated_at              DateTime                   @updatedAt
+  employees               employee[]
+  userManagedDepartmenets user_managed_departmenet[]
 }
 
 // Pointages bruts importés d'Excel
@@ -291,8 +335,10 @@ model workspace {
   updated_at DateTime  @updatedAt
 
   // Relations
-  employees  employee[]
-  jourFeries jour_ferie[]
+  employees    employee[]
+  jourFeries   jour_ferie[]
+  zones        zone[]
+  departmenets departmenet[]
 
   @@map("workspaces")
 }
@@ -338,4 +384,114 @@ model jour_ferie {
   created_by String?
 
   @@map("jours_feries")
+}
+
+// ==========================================
+// NOUVEAUX MODÈLES : MISSIONS ET PERMISSIONS
+// ==========================================
+
+model mission {
+  id String @id @default(cuid())
+
+  numero      String // Numéro de la mission
+  // Relation avec l'employé qui fait la mission
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  direction          String?
+  // Détails de la mission
+  date_debut         DateTime
+  date_retour        DateTime? // Optionnel (machi oblige)
+  plus_80km          Boolean   @default(false)
+  drahem             Float? // Le montant (ch7al yadi)
+  drahem_lidahom     Float? // Le montant (ch7al yadi pour les fonctionnaire)
+  vehicule_matricule String? // Optionnel (machi oblige)
+  destination        String // Destination de la mission
+
+  // Métadonnées
+  created_by String? // L'ID du user qui a créé la mission
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([employee_id])
+  @@map("missions")
+}
+
+// Table pivot : Quels départements sont gérés par quel user
+model user_managed_departmenet {
+  id String @id @default(cuid())
+
+  user_id String
+  user    user   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  departmenet_id String
+  departmenet    departmenet @relation(fields: [departmenet_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+
+  // Un user ne peut être lié au même département qu'une seule fois
+  @@unique([user_id, departmenet_id])
+  @@map("user_managed_departmenets")
+}
+
+// Table pivot : Quels employés spécifiques sont gérés par quel user
+model user_managed_employee {
+  id String @id @default(cuid())
+
+  user_id String
+  user    user   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+
+  // Un user ne peut être lié au même employé qu'une seule fois
+  @@unique([user_id, employee_id])
+  @@map("user_managed_employees")
+}
+
+model sortie {
+  id String @id @default(cuid())
+
+  numero      String // Numéro de la sortie
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  direction    String?
+  // Détails de la sortie
+  date         DateTime
+  heure_sortie String
+  heure_entree String?
+  motif        String
+
+  // Métadonnées
+  created_by String? // L'ID du user qui a créé la mission
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([employee_id])
+  @@map("sorties")
+}
+
+model maladie {
+  id String @id @default(cuid())
+
+  employee_id String
+  employee    employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  date         DateTime
+  duree        Int
+  date_retour  DateTime?
+  type_maladie String?
+
+  caisse_assurance String
+
+  // Métadonnées
+  created_by String? // L'ID du user qui a créé la mission
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([employee_id])
+  @@map("maladies")
 }

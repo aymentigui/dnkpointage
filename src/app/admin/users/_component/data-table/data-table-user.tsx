@@ -71,8 +71,8 @@ export function DataTable({
     // Déterminer si l'utilisateur a la permission d'afficher la colonne "Actions"
     const hasPermissionAction = React.useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((permission: string) =>
-            permission === "users_update" || permission === "users_delete"
+        session?.user?.permissions.some((permission: string[]) =>
+            permission.includes("users_update") || permission.includes("users_delete")
         )
     ), [session]);
 

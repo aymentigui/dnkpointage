@@ -31,7 +31,11 @@ export async function GET(request: NextRequest, { params }: any) {
 
     const employees = await prisma.employee.findMany({
       where: { workspace_id: workspaceId },
-      include: { cycles: true },
+      include: {
+        cycles: true,
+        departmenet: true,
+        zoneEmployes: { include: { zone: true } },
+      },
     });
 
     if (employees.length === 0) return NextResponse.json({});

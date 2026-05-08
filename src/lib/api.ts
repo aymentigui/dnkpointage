@@ -139,6 +139,8 @@ export const employeesApi = {
     workspace_id?: string;
     search?: string;
     zone?: string;
+    department?: string;
+    active?: string;
     presence?:
       | "1m"
       | "2m"
@@ -171,7 +173,10 @@ export const employeesApi = {
     prenom?: string;
     poste?: string;
     zone?: string;
+    departmenet_id?: string;
+    zone_ids?: string[];
     workspace_id: string;
+    active?: boolean;
     cycle?: {
       type: "weekly" | "rotation" | "night";
       rest_days?: number[]; // weekly
@@ -187,8 +192,11 @@ export const employeesApi = {
     data: {
       nom?: string;
       prenom?: string;
+      departement?: string;
+      zones?: string[];
       poste?: string;
       zone?: string;
+      active?: boolean;
       cycle?: {
         type: "weekly" | "rotation" | "night" | "unknown";
         rest_days?: number[];

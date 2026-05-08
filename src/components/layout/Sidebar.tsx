@@ -13,10 +13,14 @@ import {
     BarChart3,
     FileText,
     History,
+    Car,
+    DoorOpen,
+    Syringe,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePathname } from 'next/navigation'
 import { useWorkspace } from '@/hooks/use-workspace'
+import { useSession } from '@/hooks/use-session'
 
 interface SidebarProps {
     collapsed?: boolean
@@ -47,14 +51,57 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         onToggle?.()
     }
 
+    // permission
+    const { session } = useSession();
+    // console.log(session)
+    const hasPermissionViewJourFerie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_jour_ferie"))
+    ), [session]);
+
+    const hasPermissionViewEmploye = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_employe"))
+    ), [session]);
+
+    const hasPermissionViewPlanning = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_planning"))
+    ), [session]);
+
+    const hasPermissionViewHistory = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_history"))
+    ), [session]);
+
+    const hasPermissionViewImport = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_import"))
+    ), [session]);
+
+    const hasPermissionViewSettings = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_settings"))
+    ), [session]);
+
+    const hasPermissionViewMission = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("mission_view"))
+    ), [session]);
+
+    const hasPermissionViewSortie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("sortie_view"))
+    ), [session]);
+
+
+    const hasPermissionViewMaladie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("maladie_view"))
+    ), [session]);
+
     const menuItems = [
-        { icon: Users, label: 'Employés', href: '/employees' },
-        { icon: Calendar, label: 'Planning', href: '/planning' },
+        { icon: Users, label: 'Employés', href: '/employees', permission: hasPermissionViewEmploye },
+        { icon: Calendar, label: 'Planning', href: '/planning', permission: hasPermissionViewPlanning },
         // { icon: BarChart3, label: 'Statistiques', href: '/stats' },
-        { icon: FileText, label: 'Import/Export', href: '/import' },
-        { icon: Calendar, label: 'Jours Fériés', href: '/jours-feries' },
-        { icon: History, label: 'Historique', href: '/history' },
-        { icon: Settings, label: 'Paramètres', href: '/settings' },
+        { icon: FileText, label: 'Import/Export', href: '/import', permission: hasPermissionViewImport },
+        { icon: Calendar, label: 'Jours Fériés', href: '/jours-feries', permission: hasPermissionViewJourFerie },
+        { icon: History, label: 'Historique', href: '/history', permission: hasPermissionViewHistory },
+        { icon: Settings, label: 'Paramètres', href: '/settings', permission: hasPermissionViewSettings },
+        { icon: Car, label: 'Missions', href: '/missions', permission: hasPermissionViewMission },
+        { icon: DoorOpen, label: 'Bons de Sortie', href: '/bon_sortie', permission: hasPermissionViewSortie },
+        { icon: Syringe, label: 'Maladies', href: '/maladie', permission: hasPermissionViewMaladie },
     ]
 
     return (
@@ -90,7 +137,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
 
                     {/* Menu Items */}
                     <div className="space-y-1">
-                        {menuItems.map((item) => (
+                        {menuItems.filter((item) => item.permission).map((item) => (
                             <Button
                                 key={item.label}
                                 variant="ghost"

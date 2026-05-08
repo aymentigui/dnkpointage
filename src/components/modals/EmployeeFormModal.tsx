@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { employeesApi } from '@/lib/api'
 import { toast } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
@@ -29,6 +30,16 @@ interface EmployeeFormModalProps {
     workspaceId: string
     employee?: any   // si fourni → mode édition
     onSuccess: () => void
+}
+
+interface Departement {
+    id: string
+    name: string
+}
+
+interface Zone {
+    id: string
+    name: string
 }
 
 // ─── Constants ────────────────────────────────────────────────
@@ -88,32 +99,84 @@ export function EmployeeFormModal({
     const [nom, setNom] = useState('')
     const [prenom, setPrenom] = useState('')
     const [poste, setPoste] = useState('')
-    const [zone, setZone] = useState('')
+    const [departementId, setDepartementId] = useState<string>('')
+    const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([])
+    const [active, setActive] = useState<boolean>(true) // 🔥 NOUVEAU : State pour le statut
+
+    // ── Data dynamiques ───────────────────────────────────────
+    const [departements, setDepartements] = useState<Departement[]>([])
+    const [zones, setZones] = useState<Zone[]>([])
+    const [loadingData, setLoadingData] = useState(false)
 
     // ── Cycle ─────────────────────────────────────────────────
     const [cycle, setCycle] = useState<CycleForm>(DEFAULT_CYCLE)
     const [defineCycle, setDefineCycle] = useState(false)
     const [loading, setLoading] = useState(false)
 
-    // ── Sync à l'ouverture ────────────────────────────────────
+    // ── Charger les départements et zones ─────────────────────
+    useEffect(() => {
+        if (!open || !workspaceId) return
+
+        const fetchData = async () => {
+            setLoadingData(true)
+            try {
+                const [departementsRes, zonesRes] = await Promise.all([
+                    fetch(`/api/workspaces/${workspaceId}/departements`),
+                    fetch(`/api/workspaces/${workspaceId}/zones`)
+                ])
+
+                if (departementsRes.ok) {
+                    const deps = await departementsRes.json()
+                    setDepartements(deps)
+                }
+                if (zonesRes.ok) {
+                    const zns = await zonesRes.json()
+                    setZones(zns)
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error)
+                toast.error('Erreur lors du chargement des données')
+            } finally {
+                setLoadingData(false)
+            }
+        }
+
+        fetchData()
+    }, [open, workspaceId])
+
+    // ── Sync à l'ouverture (mode édition) ────────────────────
     useEffect(() => {
         if (!open) return
+
         if (isEdit && employee) {
             setMatricule(employee.matricule ?? '')
             setNom(employee.nom ?? '')
             setPrenom(employee.prenom ?? '')
             setPoste(employee.poste ?? '')
-            setZone(employee.zone ?? '')
+            setDepartementId(employee.departmenet_id ?? '')
+            setActive(employee.active ?? true) // 🔥 NOUVEAU : Récupération du statut
+
+            // Récupérer les zones de l'employé
+            const zoneIds = employee.zoneEmployes?.map((ze: any) => ze.zone_id) ?? []
+            setSelectedZoneIds(zoneIds)
+
             const { form, defined } = parseCycle(employee.cycles)
             setCycle(form)
             setDefineCycle(defined)
         } else {
-            setMatricule(''); setNom(''); setPrenom(''); setPoste(''); setZone('')
-            setCycle(DEFAULT_CYCLE); setDefineCycle(false)
+            setMatricule('')
+            setNom('')
+            setPrenom('')
+            setPoste('')
+            setDepartementId('')
+            setActive(true) // 🔥 NOUVEAU : Statut par défaut à "Actif"
+            setSelectedZoneIds([])
+            setCycle(DEFAULT_CYCLE)
+            setDefineCycle(false)
         }
     }, [open, employee, isEdit])
 
-    // ── Helpers ───────────────────────────────────────────────
+    // ─── Helpers ───────────────────────────────────────────────
     const updateCycle = (patch: Partial<CycleForm>) =>
         setCycle(prev => ({ ...prev, ...patch }))
 
@@ -123,6 +186,14 @@ export function EmployeeFormModal({
                 ? cycle.rest_days.filter(d => d !== id)
                 : [...cycle.rest_days, id],
         })
+
+    const toggleZone = (zoneId: string) => {
+        setSelectedZoneIds(prev =>
+            prev.includes(zoneId)
+                ? prev.filter(id => id !== zoneId)
+                : [...prev, zoneId]
+        )
+    }
 
     // ── Validation ────────────────────────────────────────────
     const isCycleValid = !defineCycle
@@ -146,6 +217,7 @@ export function EmployeeFormModal({
             else toast.error(cycle.type === 'weekly' ? 'Sélectionnez au moins un jour de repos' : 'Jours ≥ 1')
             return
         }
+
         setLoading(true)
         try {
             const cyclePayload = buildCyclePayload()
@@ -155,7 +227,9 @@ export function EmployeeFormModal({
                     nom: nom || undefined,
                     prenom: prenom || undefined,
                     poste: poste || undefined,
-                    zone: zone || undefined,
+                    departement: departementId || undefined,
+                    zones: selectedZoneIds.length > 0 ? selectedZoneIds : undefined,
+                    active, // 🔥 NOUVEAU : Envoi du statut
                     cycle: cyclePayload as any,
                 })
                 toast.success('Employé modifié')
@@ -165,8 +239,10 @@ export function EmployeeFormModal({
                     nom: nom || undefined,
                     prenom: prenom || undefined,
                     poste: poste || undefined,
-                    zone: zone || undefined,
+                    departmenet_id: departementId || undefined,
+                    zone_ids: selectedZoneIds.length > 0 ? selectedZoneIds : undefined,
                     workspace_id: workspaceId,
+                    active, // 🔥 NOUVEAU : Envoi du statut
                     cycle: cyclePayload as any,
                 })
                 toast.success('Employé créé')
@@ -196,7 +272,7 @@ export function EmployeeFormModal({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[520px] p-0 overflow-hidden gap-0">
+            <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden gap-0">
 
                 {/* Header */}
                 <div className="px-6 pt-5 pb-4 border-b border-slate-100">
@@ -247,7 +323,7 @@ export function EmployeeFormModal({
                             <div className="space-y-1.5">
                                 <Label className="text-[12px] font-semibold text-slate-600">Prénom</Label>
                                 <Input value={prenom} onChange={e => setPrenom(e.target.value)}
-                                    placeholder="Prenom" className="h-9 text-sm" />
+                                    placeholder="Prénom" className="h-9 text-sm" />
                             </div>
                             <div className="space-y-1.5">
                                 <Label className="text-[12px] font-semibold text-slate-600">Nom</Label>
@@ -256,10 +332,87 @@ export function EmployeeFormModal({
                             </div>
                         </div>
 
+                        {/* 🔥 MODIFIÉ : Département et Statut dans la même grille */}
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* Département - Select */}
+                            <div className="space-y-1.5">
+                                <Label className="text-[12px] font-semibold text-slate-600">Département</Label>
+                                <Select value={departementId} onValueChange={setDepartementId}>
+                                    <SelectTrigger className="h-9 text-sm">
+                                        <SelectValue placeholder="Sélectionner un département" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="null">Aucun département</SelectItem>
+                                        {departements.map((dep) => (
+                                            <SelectItem key={dep.id} value={dep.id}>
+                                                {dep.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {loadingData && (
+                                    <p className="text-[10px] text-slate-400">Chargement des départements...</p>
+                                )}
+                            </div>
+
+                            {/* 🔥 NOUVEAU : Statut - Select */}
+                            <div className="space-y-1.5">
+                                <Label className="text-[12px] font-semibold text-slate-600">Statut</Label>
+                                <Select value={active ? 'true' : 'false'} onValueChange={v => setActive(v === 'true')}>
+                                    <SelectTrigger className="h-9 text-sm">
+                                        <SelectValue placeholder="Statut de l'employé" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="true">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                                Actif
+                                            </div>
+                                        </SelectItem>
+                                        <SelectItem value="false">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
+                                                Inactif
+                                            </div>
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {/* Zones - Multi-select avec checkboxes */}
                         <div className="space-y-1.5">
-                            <Label className="text-[12px] font-semibold text-slate-600">Zone</Label>
-                            <Input value={zone} onChange={e => setZone(e.target.value)}
-                                placeholder="Zone A" className="h-9 text-sm" />
+                            <Label className="text-[12px] font-semibold text-slate-600">Zones</Label>
+                            {zones.length === 0 && !loadingData ? (
+                                <p className="text-[12px] text-slate-400 italic">Aucune zone disponible</p>
+                            ) : (
+                                <div className="border border-slate-200 rounded-lg p-3 space-y-2 max-h-32 overflow-y-auto">
+                                    {zones.map((zone) => (
+                                        <div
+                                            key={zone.id}
+                                            onClick={() => toggleZone(zone.id)}
+                                            className={cn(
+                                                'flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors',
+                                                selectedZoneIds.includes(zone.id)
+                                                    ? 'bg-[rgba(0,143,74,0.07)] hover:bg-[rgba(0,143,74,0.1)]'
+                                                    : 'hover:bg-slate-50'
+                                            )}
+                                        >
+                                            <Checkbox
+                                                checked={selectedZoneIds.includes(zone.id)}
+                                                onCheckedChange={() => toggleZone(zone.id)}
+                                                className="h-3.5 w-3.5 pointer-events-none"
+                                            />
+                                            <span className="text-[12px] text-slate-700">{zone.name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {selectedZoneIds.length > 0 && (
+                                <p className="text-[11px] text-[#008F4A] font-medium">
+                                    {selectedZoneIds.length} zone(s) sélectionnée(s)
+                                </p>
+                            )}
                         </div>
                     </div>
 

@@ -32,7 +32,7 @@ export function AppShell({
         if (showCurrentWorkspace) {
             workspacesApi.getCurrent()
                 .then(({ data }) => { if (data.workspace) setCurrentWorkspace(data.workspace) })
-                .catch(console.error)
+            // .catch(console.error)
         }
     }, [showCurrentWorkspace])
 

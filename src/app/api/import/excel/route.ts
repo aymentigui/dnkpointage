@@ -1,3 +1,5 @@
+// app/api/employees/import/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as XLSX from "xlsx";
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
     if (type === "staff") {
-      // Import base personnel (5 colonnes: Matricule, Nom, Prénom, Poste, Zone)
+      // Import base personnel (6 colonnes: Matricule, Nom, Prénom, Poste, Zone, Département)
       return await importStaff(rows, mode as string, workspaceId);
     } else {
       // Import pointages (4 colonnes: Matricule, Date, Entrée, Sortie)
@@ -50,45 +52,119 @@ export async function POST(request: NextRequest) {
 async function importStaff(rows: any[], mode: string, workspaceId: string) {
   const stats = { ajoutes: 0, misAJour: 0, ignores: 0 };
 
-  for (const row of rows) {
-    if (!row || row.length < 5) {
-      stats.ignores++;
-      continue;
-    }
-    const [matricule, nom, prenom, poste, zone] = row.map(String);
+  for (const element of rows) {
+    const row = element as any[];
 
-    if (!matricule?.trim()) {
-      stats.ignores++;
+    if (!row || row.length < 1) {
       continue;
     }
 
+    const [matricule, nom, prenom, poste, zoneRaw, departementRaw] = row.map(
+      (val: any) => (val == null ? "" : String(val).trim()),
+    );
+
+    if (!matricule) {
+      continue;
+    }
+
+    if (matricule.toLowerCase() === "matricule") continue;
+
+    // ── 1. Gestion des Zones (Virgule, Majuscule, Sans Espaces) ──
+    const zoneIds: string[] = [];
+    if (zoneRaw) {
+      // Séparer par virgule
+      const zonesList = zoneRaw.split(",");
+
+      for (const z of zonesList) {
+        // Enlever TOUS les espaces et mettre en majuscule (ex: " zone 2 " -> "ZONE2")
+        // const zoneName = z.replace(/\s+/g, "").toUpperCase();
+        // new maj : Enlever  les espaces juste au debut et a la fin et mettre en majuscule
+        const zoneName = z.trim().toUpperCase();
+
+        if (!zoneName) continue; // Si c'était juste des espaces ou vide
+
+        // Vérifier si elle existe kima hiya
+        let zoneRecord = await prisma.zone.findFirst({
+          where: { name: zoneName, workspace_id: workspaceId },
+        });
+
+        // Sinon, créer la zone
+        if (!zoneRecord) {
+          zoneRecord = await prisma.zone.create({
+            data: { name: zoneName, workspace_id: workspaceId },
+          });
+        }
+
+        // Ajouter l'ID à notre liste pour cet employé
+        if (!zoneIds.includes(zoneRecord.id)) {
+          zoneIds.push(zoneRecord.id);
+        }
+      }
+    }
+
+    // ── 2. Gestion du Département ──
+    let depId = null;
+    if (departementRaw) {
+      const depName = departementRaw.toUpperCase();
+      let depRecord = await prisma.departmenet.findFirst({
+        where: { name: depName, workspace_id: workspaceId },
+      });
+      if (!depRecord) {
+        depRecord = await prisma.departmenet.create({
+          data: { name: depName, workspace_id: workspaceId },
+        });
+      }
+      depId = depRecord.id;
+    }
+
+    // ── 3. Gestion de l'Employé ──
     const existing = await prisma.employee.findFirst({
-      where: { matricule: matricule.trim(), workspace_id: workspaceId },
+      where: { matricule: matricule, workspace_id: workspaceId },
     });
 
     if (existing && mode === "fusion") {
-      // Mise à jour
+      // Mise à jour de l'employé
       await prisma.employee.update({
         where: { id: existing.id },
         data: {
-          nom: nom?.trim() || existing.nom,
-          prenom: prenom?.trim() || existing.prenom,
-          poste: poste?.trim() || existing.poste,
-          zone: zone?.trim() || existing.zone,
+          nom: nom || existing.nom,
+          prenom: prenom || existing.prenom,
+          poste: poste || existing.poste,
+          departmenet_id: depId || existing.departmenet_id,
         },
       });
+
+      // Lier les zones si elles ne sont pas déjà liées
+      for (const zId of zoneIds) {
+        const linkExists = await prisma.zone_employe.findFirst({
+          where: { employee_id: existing.id, zone_id: zId },
+        });
+        if (!linkExists) {
+          await prisma.zone_employe.create({
+            data: { employee_id: existing.id, zone_id: zId },
+          });
+        }
+      }
       stats.misAJour++;
     } else if (!existing) {
-      // Création
+      // Création de l'employé
       await prisma.employee.create({
         data: {
-          matricule: matricule.trim(),
-          nom: nom?.trim(),
-          prenom: prenom?.trim(),
-          poste: poste?.trim(),
-          zone: zone?.trim(),
+          matricule: matricule,
+          nom: nom || null,
+          prenom: prenom || null,
+          poste: poste || null,
           workspace_id: workspaceId,
-          cycles: { create: { type: "unknown" } },
+          departmenet_id: depId,
+          cycles: { create: { type: "unknown", est_manuel: false } },
+          // Création directe des liaisons dans la table zone_employe
+          ...(zoneIds.length > 0
+            ? {
+                zoneEmployes: {
+                  create: zoneIds.map((zId) => ({ zone_id: zId })),
+                },
+              }
+            : {}),
         },
       });
       stats.ajoutes++;
@@ -103,6 +179,7 @@ async function importStaff(rows: any[], mode: string, workspaceId: string) {
   });
 }
 
+// Le reste du fichier (importPointages, parseDate, detecterNuit, recalculerTousPlannings) reste exactement pareil...
 async function importPointages(rows: any[], mode: string, workspaceId: string) {
   const stats = { nouveaux: 0, existants: 0, ignores: 0 };
 
@@ -114,7 +191,10 @@ async function importPointages(rows: any[], mode: string, workspaceId: string) {
 
     const [matricule, dateRaw, entree, sortie] = row;
 
-    if (!matricule?.toString().trim()) {
+    if (
+      !matricule?.toString().trim() ||
+      matricule.toString().toLowerCase() === "matricule"
+    ) {
       stats.ignores++;
       continue;
     }
@@ -178,7 +258,6 @@ async function importPointages(rows: any[], mode: string, workspaceId: string) {
     }
   }
 
-  // Déclencher le recalcul automatique des plannings
   await recalculerTousPlannings();
 
   return NextResponse.json({
@@ -189,12 +268,10 @@ async function importPointages(rows: any[], mode: string, workspaceId: string) {
 
 function parseDate(val: any): Date | null {
   if (!val) return null;
-
   if (val instanceof Date) return val;
 
   const str = String(val).trim();
 
-  // Format DD/MM/YYYY
   let match = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (match) {
     return new Date(
@@ -202,7 +279,6 @@ function parseDate(val: any): Date | null {
     );
   }
 
-  // Format YYYY-MM-DD
   match = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (match) {
     return new Date(
@@ -210,7 +286,6 @@ function parseDate(val: any): Date | null {
     );
   }
 
-  // Excel serial
   const num = parseFloat(str);
   if (!isNaN(num) && num > 40000) {
     return new Date((num - 25569) * 86400000);

@@ -61,8 +61,8 @@ export function DataTable<TData extends RoleData, TValue>({
     // Permissions check
     const hasPermissionAction = React.useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((permission: string) =>
-            permission === "roles_update" || permission === "roles_delete"
+        session?.user?.permissions.some((permission: string[]) =>
+            permission.includes("roles_update") || permission.includes("roles_delete")
         )
     ), [session]);
 

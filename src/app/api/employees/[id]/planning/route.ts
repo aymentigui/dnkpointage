@@ -9,7 +9,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { verifySession } from "@/actions/permissions";
+import {
+  verifySession,
+  withAuthorizationPermission,
+} from "@/actions/permissions";
 
 const SEUIL_BADGEUSE_UNIQUE_MIN = 15;
 const SEUIL_SORTIE_MATIN_MAX_H = 8;
@@ -31,6 +34,21 @@ export async function GET(request: NextRequest, { params }: any) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission([
+      "view_planning",
+    ]);
+
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission de voir les plannings" },
+        { status: 403 },
+      );
+    }
+
     const { id } = await params;
     const searchParams = request.nextUrl.searchParams;
     const dateDebut = searchParams.get("debut");

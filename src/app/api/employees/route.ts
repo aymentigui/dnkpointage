@@ -1,6 +1,9 @@
 // app/api/employees/route.ts
 
-import { verifySession } from "@/actions/permissions";
+import {
+  verifySession,
+  withAuthorizationPermission,
+} from "@/actions/permissions";
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -14,15 +17,6 @@ function getPeriodeDates(mois: number): { gte: Date; lte: Date } {
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/employees
-//
-// presence :
-//   "1m"        → au moins 1 pointage dans les 30 derniers jours
-//   "2m"        → au moins 1 pointage dans les 2 derniers mois
-//   "3m"        → au moins 1 pointage dans les 3 derniers mois
-//   "never"     → jamais de pointage
-//   "absent_1m" → aucun pointage ce mois-ci
-//   "absent_2m" → aucun pointage ces 2 derniers mois
-//   "absent_3m" → aucun pointage ces 3 derniers mois
 // ─────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   try {
@@ -33,9 +27,28 @@ export async function GET(request: NextRequest) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission([
+      "view_employe",
+    ]);
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission de voir les employés" },
+        { status: 403 },
+      );
+    }
+
     const sp = request.nextUrl.searchParams;
     const search = sp.get("search") || "";
-    const zone = sp.get("zone") || "";
+    const zone_id = sp.get("zone") || sp.get("zone_id") || "";
+    const departmenet_id = sp.get("departmenet_id") || "";
+
+    // ── NOUVEAU: Filtre active (par défaut à "true") ──
+    const activeFilter = sp.get("active") || "true";
+
     const page = parseInt(sp.get("page") || "1");
     const limit = parseInt(sp.get("limit") || "50000");
     const workspace_id = sp.get("workspace_id") || sp.get("workspaceId") || "";
@@ -53,16 +66,28 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    if (zone) where.zone = { contains: zone };
     if (workspace_id) where.workspace_id = workspace_id;
+    if (departmenet_id) where.departmenet_id = departmenet_id;
+
+    // Application du filtre active
+    if (activeFilter !== "all") {
+      where.active = activeFilter === "true"; // Devient true ou false selon la valeur
+    }
+
+    // Filtre par zone via la table de liaison zone_employe
+    if (zone_id) {
+      where.zoneEmployes = {
+        some: {
+          zone_id: zone_id,
+        },
+      };
+    }
 
     // ── Filtre présence / absence ─────────────────────────
     if (presenceFilter && presenceFilter !== "all" && presenceFilter !== "") {
       if (presenceFilter === "never") {
-        // Aucun pointage du tout
         where.pointages = { none: {} };
       } else if (presenceFilter.startsWith("absent_")) {
-        // Absent sur la période = aucun pointage dans la période
         const nbMois =
           presenceFilter === "absent_1m"
             ? 1
@@ -81,7 +106,6 @@ export async function GET(request: NextRequest) {
           };
         }
       } else {
-        // Présent sur la période = au moins 1 pointage dans la période
         const nbMois =
           presenceFilter === "1m"
             ? 1
@@ -107,6 +131,12 @@ export async function GET(request: NextRequest) {
         where,
         include: {
           cycles: true,
+          departmenet: true,
+          zoneEmployes: {
+            include: {
+              zone: true,
+            },
+          },
           _count: {
             select: {
               pointages: true,
@@ -135,7 +165,7 @@ export async function GET(request: NextRequest) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// POST /api/employees — Créer un employé + cycle optionnel
+// POST /api/employees — Créer un employé + cycle + relations
 // ─────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
@@ -146,8 +176,31 @@ export async function POST(request: NextRequest) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission(["add_employe"]);
+
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission d'ajouter un employé" },
+        { status: 403 },
+      );
+    }
+
     const body = await request.json();
-    const { matricule, nom, prenom, poste, zone, workspace_id, cycle } = body;
+    const {
+      matricule,
+      nom,
+      prenom,
+      poste,
+      active, // Optionnel, Prisma le met à true par défaut
+      departmenet_id,
+      zone_ids,
+      workspace_id,
+      cycle,
+    } = body;
 
     if (!matricule?.trim()) {
       return NextResponse.json({ error: "Matricule requis" }, { status: 400 });
@@ -169,11 +222,23 @@ export async function POST(request: NextRequest) {
         nom: nom || null,
         prenom: prenom || null,
         poste: poste || null,
-        zone: zone || null,
+        active: active !== undefined ? active : true, // Prise en compte ici aussi
         workspace_id,
+        departmenet_id: departmenet_id || null,
         cycles: { create: buildCycleCreate(cycle) },
+        ...(zone_ids && Array.isArray(zone_ids) && zone_ids.length > 0
+          ? {
+              zoneEmployes: {
+                create: zone_ids.map((id: string) => ({ zone_id: id })),
+              },
+            }
+          : {}),
       },
-      include: { cycles: true },
+      include: {
+        cycles: true,
+        departmenet: true,
+        zoneEmployes: { include: { zone: true } },
+      },
     });
 
     return NextResponse.json(employee, { status: 201 });
@@ -188,7 +253,6 @@ export async function POST(request: NextRequest) {
 
 // ─────────────────────────────────────────────────────────────
 // DELETE /api/employees — Supprimer plusieurs employés
-// body: { ids: string[] }
 // ─────────────────────────────────────────────────────────────
 export async function DELETE(request: NextRequest) {
   try {
@@ -214,6 +278,7 @@ export async function DELETE(request: NextRequest) {
       prisma.annotation.deleteMany({ where: { employee_id: { in: ids } } }),
       prisma.pointage.deleteMany({ where: { employee_id: { in: ids } } }),
       prisma.cycle.deleteMany({ where: { employee_id: { in: ids } } }),
+      prisma.zone_employe.deleteMany({ where: { employee_id: { in: ids } } }),
       prisma.employee.deleteMany({ where: { id: { in: ids } } }),
     ]);
 

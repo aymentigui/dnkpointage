@@ -16,6 +16,9 @@ export const permissions = [
   { name: "files_update", group: "files" },
   { name: "files_delete", group: "files" },
 
+  { name: "add_annotation_present", group: "annotation" },
+  { name: "add_annotation_absent", group: "annotation" },
+  { name: "add_annotation_rest", group: "annotation" },
   { name: "add_annotation_mission", group: "annotation" },
   { name: "add_annotation_justified", group: "annotation" },
   { name: "add_annotation_maladie", group: "annotation" },
@@ -50,4 +53,31 @@ export const permissions = [
 
   { name: "update_planning", group: "planning" },
   { name: "view_planning", group: "planning" },
+
+  { name: "mission_view", group: "mission" },
+  { name: "mission_create", group: "mission" },
+  { name: "mission_update", group: "mission" },
+  { name: "mission_delete", group: "mission" },
+  { name: "mission_export", group: "mission" },
+  { name: "mission_print", group: "mission" },
+  { name: "mission_edit_drahem", group: "mission" },
+  { name: "mission_edit_drahem_lidahom", group: "mission" },
+  { name: "mission_view_drahem", group: "mission" },
+  { name: "mission_view_drahem_lidahom", group: "mission" },
+
+  { name: "sortie_view", group: "sortie" },
+  { name: "sortie_create", group: "sortie" },
+  { name: "sortie_update", group: "sortie" },
+  { name: "sortie_delete", group: "sortie" },
+  { name: "sortie_export", group: "sortie" },
+  { name: "sortie_print", group: "sortie" },
+
+  { name: "maladie_view", group: "maladie" },
+  { name: "maladie_create", group: "maladie" },
+  { name: "maladie_update", group: "maladie" },
+  { name: "maladie_delete", group: "maladie" },
+  { name: "maladie_export", group: "maladie" },
+
+  { name: "view_settings", group: "settings" },
+  { name: "view_import", group: "settings" },
 ];

@@ -6,6 +6,7 @@
 //   fin            : YYYY-MM-DD
 //   search         : "mat1,nom ,prenom"   → matricule OU nom OU prénom contient
 //   poste          : "tech,agent"         → poste contient (OR)
+//   departement    : "rh,it"              → departement contient (OR) // 🔥 NOUVEAU
 //   zone           : "zone1,zone2"        → zone contient OU exact selon zoneExact
 //   zoneExact      : "true"               → zone = exact match
 //   presenceFilter : "all" | "has" | "none"
@@ -21,11 +22,10 @@ const SEUIL_SORTIE_MATIN_MAX_H = 8;
 const SEUIL_ENTREE_NUIT_MIN_H = 14;
 const SEUIL_SORTIE_NUIT_MAX_H = 10;
 
-// 🔥 AJOUT DE "A" ET "P" POUR FORCER LES ABSENCES ET PRÉSENCES VIA ANNOTATION
 const ANNOT_CODES = new Set(["M", "J", "Md", "Rc", "C", "Ce"]);
 
 // ─────────────────────────────────────────────────────────────
-// Helpers filtrage texte (identiques au frontend)
+// Helpers filtrage texte
 // ─────────────────────────────────────────────────────────────
 
 function parseTokens(text: string): string[] {
@@ -69,13 +69,15 @@ export async function GET(request: NextRequest) {
     const workspaceId = sp.get("workspaceId");
     const searchParam = sp.get("search") ?? "";
     const posteParam = sp.get("poste") ?? "";
+    const departementParam = sp.get("departement") ?? ""; // 🔥 NOUVEAU
     const zoneParam = sp.get("zone") ?? "";
     const zoneExact = sp.get("zoneExact") === "true";
-    const presenceFilter = sp.get("presenceFilter") ?? "all"; // all | has | none
-    const cycleFilter = sp.get("cycleFilter") ?? "all"; // all | with_cycle | without_cycle
+    const presenceFilter = sp.get("presenceFilter") ?? "all";
+    const cycleFilter = sp.get("cycleFilter") ?? "all";
 
     const searchTokens = parseTokens(searchParam);
     const posteTokens = parseTokens(posteParam);
+    const departementTokens = parseTokens(departementParam); // 🔥 NOUVEAU
     const zoneTokens = parseTokens(zoneParam);
 
     const dateCondition: any = {};
@@ -88,7 +90,14 @@ export async function GET(request: NextRequest) {
     // ── 1. Charger tous les employés du workspace ─────────────
     const allEmployees = await prisma.employee.findMany({
       where: workspaceId ? { workspace_id: workspaceId } : {},
-      include: { cycles: true },
+      include: {
+        cycles: true,
+        departmenet: true, // 🔥 NOUVEAU : Chargement du département
+        zoneEmployes: {
+          // 🔥 MODIFIÉ : Chargement des zones associées via la table pivot
+          include: { zone: true },
+        },
+      },
     });
 
     if (allEmployees.length === 0) {
@@ -119,12 +128,10 @@ export async function GET(request: NextRequest) {
           est_nuit: true,
         },
       }),
-      // On remonte la récupération des annotations ici pour pouvoir filtrer dessus
       prisma.annotation.findMany({
         where: { employee_id: { in: allEmployeeIds }, ...dateCondition },
         include: { employee: { select: { matricule: true } } },
       }),
-      // 🔥 NOUVEAU : Récupération des jours fériés
       prisma.jour_ferie.findMany({
         where: workspaceId
           ? {
@@ -213,7 +220,6 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Compter présences par employé
     const nbPresencesParEmp = new Map<string, number>();
     allEmployees.forEach((emp: any) => {
       let count = 0;
@@ -223,7 +229,6 @@ export async function GET(request: NextRequest) {
       nbPresencesParEmp.set(emp.id, count);
     });
 
-    // Compter annotations par employé
     const nbAnnotationsParEmp = new Map<string, number>();
     allAnnotations.forEach((a: any) => {
       const current = nbAnnotationsParEmp.get(a.employee_id) ?? 0;
@@ -243,14 +248,33 @@ export async function GET(request: NextRequest) {
       if (posteTokens.length > 0) {
         if (!matchesAny(emp.poste, posteTokens)) return false;
       }
+
+      // 🔥 NOUVEAU : Filtre Département
+      if (departementTokens.length > 0) {
+        const deptName = emp.departmenet?.name;
+        if (!matchesAny(deptName, departementTokens)) return false;
+      }
+
+      // 🔥 MODIFIÉ : Filtre Zones (Table relationnelle)
       if (zoneTokens.length > 0) {
+        const empZoneNames =
+          emp.zoneEmployes?.map((ze: any) => ze.zone?.name).filter(Boolean) ||
+          [];
+
+        // Fallback optionnel sur l'ancien champ string `zone` si la table relationnelle est vide
+        if (empZoneNames.length === 0 && emp.zone) {
+          empZoneNames.push(emp.zone);
+        }
+
         const ok = zoneExact
-          ? matchesExact(emp.zone, zoneTokens)
-          : matchesAny(emp.zone, zoneTokens);
+          ? empZoneNames.some((zName: string) =>
+              matchesExact(zName, zoneTokens),
+            )
+          : empZoneNames.some((zName: string) => matchesAny(zName, zoneTokens));
+
         if (!ok) return false;
       }
 
-      // Présence = (Pointage OU Annotation)
       if (presenceFilter !== "all") {
         const nbP = nbPresencesParEmp.get(emp.id) ?? 0;
         const nbA = nbAnnotationsParEmp.get(emp.id) ?? 0;
@@ -260,7 +284,6 @@ export async function GET(request: NextRequest) {
         if (presenceFilter === "none" && totalActivity > 0) return false;
       }
 
-      // 🔥 NOUVEAU : Filtre Cycle
       if (cycleFilter !== "all") {
         if (
           cycleFilter === "with_cycle" &&
@@ -287,8 +310,6 @@ export async function GET(request: NextRequest) {
 
     const employeeIds = employees.map((e: any) => e.id);
 
-    // Filtrer la liste globale des annotations pour le rendu Excel
-    // afin de ne pas fausser la génération de colonnes
     const filteredAnnotations = allAnnotations.filter((a: any) =>
       employeeIds.includes(a.employee_id),
     );
@@ -310,7 +331,6 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    // ── Map d'ancrage des cycles (Date de référence absolue) ──
     const anchorMap = new Map<string, Date>();
     premiersPointages.forEach((p) => {
       if (p._min.date) anchorMap.set(p.employee_id, p._min.date);
@@ -364,6 +384,7 @@ export async function GET(request: NextRequest) {
       nom: string;
       prenom: string;
       poste: string;
+      departement: string; // 🔥 NOUVEAU
       zone: string;
       cycle: string;
       jours: Record<string, string>;
@@ -380,7 +401,7 @@ export async function GET(request: NextRequest) {
         P: 0,
         A: 0,
         R: 0,
-        JF: 0, // 🔥 NOUVEAU
+        JF: 0,
         M: 0,
         J: 0,
         Md: 0,
@@ -410,12 +431,9 @@ export async function GET(request: NextRequest) {
 
         let code = "";
 
-        // 1. PRIORITÉ ABSOLUE : Les annotations explicites
         if (annot && ANNOT_CODES.has(annot.code)) {
           code = annot.code;
-        }
-        // 2. PRIORITÉ SECONDAIRE : Le planning BDD
-        else if (planningMap.has(planKey)) {
+        } else if (planningMap.has(planKey)) {
           const plan = planningMap.get(planKey);
           const pa = plan.annotation ?? null;
           if (pa && ANNOT_CODES.has(pa.code)) {
@@ -423,14 +441,11 @@ export async function GET(request: NextRequest) {
           } else {
             code = plan.statut;
           }
-        }
-        // 3. LOGIQUE AUTOMATIQUE (Badgeuse, Cycles & Jours Fériés)
-        else if (estFinNuit) {
+        } else if (estFinNuit) {
           code = "R";
         } else if (hadPointage) {
           code = "P";
         } else {
-          // 🔥 NOUVELLE LOGIQUE JOURS FÉRIÉS
           if (estJourRepos(new Date(dateStr), emp.cycles, anchorDate)) {
             code = "R";
           } else if (
@@ -445,7 +460,6 @@ export async function GET(request: NextRequest) {
 
         jours[dateStr] = code;
 
-        // ── 9. Calcul des Statistiques ──
         if (code === "P") {
           stats.P++;
           if (devraitRepos) stats.presences_supplementaires++;
@@ -460,7 +474,7 @@ export async function GET(request: NextRequest) {
             stats.absences_annotees++;
           }
         } else if (code === "JF") {
-          stats.JF++; // 🔥 NOUVEAU
+          stats.JF++;
         } else if (ANNOT_CODES.has(code)) {
           stats.P++;
           if (code in stats) {
@@ -473,18 +487,25 @@ export async function GET(request: NextRequest) {
             stats.absences_annotees++;
           }
         } else {
-          stats.A++; // Les "A" par défaut
+          stats.A++;
         }
       });
 
       stats.absences_nettes = stats.A - stats.absences_annotees;
+
+      // 🔥 MODIFIÉ : Récupérer toutes les zones et le département
+      const zonesList =
+        emp.zoneEmployes?.map((ze: any) => ze.zone?.name).filter(Boolean) || [];
+      const zoneString =
+        zonesList.length > 0 ? zonesList.join(", ") : (emp.zone ?? "");
 
       rows.push({
         matricule: emp.matricule,
         nom: emp.nom ?? "",
         prenom: emp.prenom ?? "",
         poste: emp.poste ?? "",
-        zone: emp.zone ?? "",
+        departement: emp.departmenet?.name ?? "", // 🔥 NOUVEAU
+        zone: zoneString, // 🔥 MODIFIÉ
         cycle: getCycleLabel(emp.cycles),
         jours,
         stats,
@@ -508,18 +529,18 @@ export async function GET(request: NextRequest) {
     ];
     const daysLabel = ["Di", "Lu", "Ma", "Me", "Je", "Ve", "Sa"];
 
-    // 🔥 AJOUT DE LA COLONNE JOURS FÉRIÉS
     const STAT_COLS = [
       "Matricule",
       "Nom",
       "Prénom",
       "Poste",
+      "Département", // 🔥 NOUVEAU
       "Zone",
       "Cycle",
       "Présences",
       "Absences",
       "Repos",
-      "Jours Fériés", // <-- Ajout ici
+      "Jours Fériés",
       "Abs. nettes",
       "Abs. justif.",
       "Mission",
@@ -552,12 +573,13 @@ export async function GET(request: NextRequest) {
         row.nom,
         row.prenom,
         row.poste,
+        row.departement, // 🔥 NOUVEAU
         row.zone,
         row.cycle,
         row.stats.P,
         row.stats.A,
         row.stats.R,
-        row.stats.JF, // <-- Insertion de la donnée JF
+        row.stats.JF,
         row.stats.absences_nettes,
         row.stats.absences_annotees,
         row.stats.M,
@@ -576,12 +598,13 @@ export async function GET(request: NextRequest) {
         "Nom",
         "Prénom",
         "Poste",
+        "Département", // 🔥 NOUVEAU
         "Zone",
         "Cycle",
         "Présences",
         "Absences totales",
         "Repos",
-        "Jours Fériés", // <-- Ajout ici
+        "Jours Fériés",
         "Absences nettes",
         "Absences justifiées",
         "Mission (M)",
@@ -594,18 +617,19 @@ export async function GET(request: NextRequest) {
       ],
     ];
     rows.forEach((row) => {
-      const total = row.stats.P + row.stats.A + row.stats.R + row.stats.JF; // On peut inclure JF dans le total si on veut, à voir selon tes règles RH
+      const total = row.stats.P + row.stats.A + row.stats.R + row.stats.JF;
       recapSheet.push([
         row.matricule,
         row.nom,
         row.prenom,
         row.poste,
+        row.departement, // 🔥 NOUVEAU
         row.zone,
         row.cycle,
         row.stats.P,
         row.stats.A,
         row.stats.R,
-        row.stats.JF, // <-- Insertion de la donnée JF
+        row.stats.JF,
         row.stats.absences_nettes,
         row.stats.absences_annotees,
         row.stats.M,
@@ -622,18 +646,19 @@ export async function GET(request: NextRequest) {
     const ws1 = XLSX.utils.aoa_to_sheet(planningSheet);
     const ws2 = XLSX.utils.aoa_to_sheet(recapSheet);
 
-    // Ajustement des colonnes suite à l'ajout de Jours Fériés
+    // Ajustement des colonnes suite à l'ajout du Département
     ws1["!cols"] = [
-      { wch: 12 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 10 },
-      { wch: 14 },
+      { wch: 12 }, // Matricule
+      { wch: 16 }, // Nom
+      { wch: 16 }, // Prenom
+      { wch: 16 }, // Poste
+      { wch: 16 }, // Departement 🔥
+      { wch: 10 }, // Zone
+      { wch: 14 }, // Cycle
       { wch: 8 }, // P
       { wch: 8 }, // A
       { wch: 8 }, // R
-      { wch: 10 }, // JF (Nouveau)
+      { wch: 10 }, // JF
       { wch: 10 },
       { wch: 10 },
       { wch: 8 },
@@ -649,12 +674,13 @@ export async function GET(request: NextRequest) {
       { wch: 16 },
       { wch: 16 },
       { wch: 16 },
+      { wch: 16 }, // Departement 🔥
       { wch: 10 },
       { wch: 14 },
-      { wch: 10 }, // P
-      { wch: 14 }, // A
-      { wch: 8 }, // R
-      { wch: 12 }, // JF (Nouveau)
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 12 },
       { wch: 14 },
       { wch: 14 },
       { wch: 12 },

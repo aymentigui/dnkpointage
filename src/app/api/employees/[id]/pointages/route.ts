@@ -6,7 +6,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { verifySession } from "@/actions/permissions";
+import {
+  verifySession,
+  withAuthorizationPermission,
+} from "@/actions/permissions";
 
 export async function GET(request: NextRequest, { params }: any) {
   try {
@@ -17,6 +20,21 @@ export async function GET(request: NextRequest, { params }: any) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission([
+      "view_pointage",
+    ]);
+
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission de voir les pointages" },
+        { status: 403 },
+      );
+    }
+
     const paramsId = await params;
     const { id } = paramsId;
     const searchParams = request.nextUrl.searchParams;

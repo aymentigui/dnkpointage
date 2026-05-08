@@ -6,7 +6,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { verifySession } from "@/actions/permissions";
+import {
+  verifySession,
+  withAuthorizationPermission,
+} from "@/actions/permissions";
 
 export async function GET(request: NextRequest, { params }: any) {
   try {
@@ -17,6 +20,21 @@ export async function GET(request: NextRequest, { params }: any) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission([
+      "view_employe",
+    ]);
+
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission de voir les employés" },
+        { status: 403 },
+      );
+    }
+
     const paramsId = await params;
     const { id } = paramsId;
     const searchParams = request.nextUrl.searchParams;
@@ -26,6 +44,8 @@ export async function GET(request: NextRequest, { params }: any) {
       where: { id },
       include: {
         cycles: true,
+        departmenet: true,
+        zoneEmployes: { include: { zone: true } },
       },
     });
     if (!employee) {
@@ -114,7 +134,9 @@ export async function GET(request: NextRequest, { params }: any) {
       nom: employee.nom,
       prenom: employee.prenom,
       poste: employee.poste,
-      zone: employee.zone,
+      zone: employee.zoneEmployes.map((ze: any) => ze.zone?.name).join(", "),
+      departement: employee.departmenet?.name,
+      active: employee.active,
       created_at: employee.created_at,
 
       // Cycle de travail
@@ -186,7 +208,8 @@ export async function PATCH(request: NextRequest, { params }: any) {
     }
     const { id } = await params;
     const body = await request.json();
-    const { nom, prenom, poste, zone, cycle } = body;
+    const { matricule, nom, prenom, poste, zones, departement, active, cycle } =
+      body;
 
     const employee = await prisma.employee.findUnique({
       where: { id },
@@ -198,14 +221,37 @@ export async function PATCH(request: NextRequest, { params }: any) {
         { status: 404 },
       );
 
+    const existing = await prisma.employee.findFirst({
+      where: { matricule: matricule, workspace_id: employee.workspace_id },
+    });
+
+    if (existing && existing.id !== id) {
+      return NextResponse.json(
+        { error: "Matricule déjà existant" },
+        { status: 400 },
+      );
+    }
+
     // Mettre à jour l'employé
     await prisma.employee.update({
       where: { id },
       data: {
+        ...(matricule !== undefined && { matricule }),
         ...(nom !== undefined && { nom: nom || null }),
         ...(prenom !== undefined && { prenom: prenom || null }),
         ...(poste !== undefined && { poste: poste || null }),
-        ...(zone !== undefined && { zone: zone || null }),
+        ...(departement !== undefined && {
+          departmenet_id: departement || null,
+        }),
+        ...(zones !== undefined && {
+          zoneEmployes: {
+            deleteMany: {},
+            create: zones.map((zoneId: string) => ({
+              zone_id: zoneId,
+            })),
+          },
+        }),
+        ...(active !== undefined && { active }),
       },
     });
 

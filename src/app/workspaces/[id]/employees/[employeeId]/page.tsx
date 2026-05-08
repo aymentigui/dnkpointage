@@ -16,6 +16,7 @@ import {
     CheckCircle2, XCircle, Coffee, Filter, Pencil, X,
     Stethoscope, RefreshCw, Palmtree, Sparkles, FileText,
     ArrowRight, History,
+    Building2,
 } from "lucide-react";
 import { CycleModal } from "@/components/modals/CycleModal";
 import { toast } from "react-hot-toast";
@@ -48,7 +49,7 @@ interface JourPlanning {
 
 interface EmployeeDetails {
     id: string; matricule: string; nom: string; prenom: string;
-    poste: string; zone: string; cycle: any;
+    poste: string; zone: string; cycle: any; departement: string;
     statistiques: {
         presents: number; absents: number; repos: number;
         total_jours: number; taux_presence: number;
@@ -141,6 +142,7 @@ const ANNOT_TYPES = [
     { code: "Rc", label: "Récupération", Icon: RefreshCw, color: "#7c3aed", light: "#f5f3ff", border: "#ddd6fe" },
     { code: "C", label: "Congé", Icon: Palmtree, color: "#d97706", light: "#fffbeb", border: "#fde68a" },
     { code: "Ce", label: "Congé exceptionnel", Icon: Sparkles, color: "#db2777", light: "#fdf2f8", border: "#fbcfe8" },
+    { code: "JF", label: "Férié", Icon: Sparkles, color: "#db2777", light: "#fdf2f8", border: "#fbcfe8" },
 ];
 
 const ANNOT_LABELS: Record<string, string> = Object.fromEntries(ANNOT_TYPES.map(a => [a.code, a.label]));
@@ -829,52 +831,67 @@ export default function EmployeeDetailPage() {
     // permission
     const { session } = useSession();
 
+    const hasPermissionAddAnnotationPresent = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_present"))
+    ), [session]);
+
+    const hasPermissionAddAnnotationAbsent = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_absent"))
+    ), [session]);
+
+    const hasPermissionAddAnnotationRest = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_rest"))
+    ), [session]);
+
     const hasPermissionAddAnnotationMission = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_mission")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_mission"))
     ), [session]);
 
     const hasPermissionAddAnnotationJustified = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_justified")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_justified"))
     ), [session]);
 
     const hasPermissionAddAnnotationMaladie = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_maladie")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_maladie"))
     ), [session]);
 
     const hasPermissionAddAnnotationRecuperation = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_recuperation")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_recuperation"))
     ), [session]);
 
     const hasPermissionAddAnnotationConge = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_conge")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_conge"))
     ), [session]);
 
     const hasPermissionAddAnnotationCongeExceptionnel = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "add_annotation_conge_exceptionnel")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_conge_exceptionnel"))
     ), [session]);
 
     const hasPermissionUpdatePlanning = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "update_planning")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("update_planning"))
     ), [session]);
 
     const hasPermissionUpdateCycle = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "update_cycle")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("update_cycle"))
     ), [session]);
 
     const hasPermissionViewPlanning = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_planning")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_planning"))
     ), [session]);
 
     const hasPermissionViewPointage = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_pointage")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_pointage"))
     ), [session]);
 
     const hasPermissionViewHistorique = useMemo(() => (
-        session?.user?.is_admin || session?.user?.permissions.some((p: string) => p === "view_history")
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_history"))
     ), [session]);
 
     // Grouping annotations permissions to pass easily to children
     const annotationPermissions = useMemo(() => ({
+        present: hasPermissionAddAnnotationPresent,
+        absent: hasPermissionAddAnnotationAbsent,
+        rest: hasPermissionAddAnnotationRest,
         mission: hasPermissionAddAnnotationMission,
         justifie: hasPermissionAddAnnotationJustified,
         maladie: hasPermissionAddAnnotationMaladie,
@@ -882,6 +899,7 @@ export default function EmployeeDetailPage() {
         conge: hasPermissionAddAnnotationConge,
         exceptionnel: hasPermissionAddAnnotationCongeExceptionnel,
     }), [
+        hasPermissionAddAnnotationPresent, hasPermissionAddAnnotationAbsent, hasPermissionAddAnnotationRest,
         hasPermissionAddAnnotationMission, hasPermissionAddAnnotationJustified,
         hasPermissionAddAnnotationMaladie, hasPermissionAddAnnotationRecuperation,
         hasPermissionAddAnnotationConge, hasPermissionAddAnnotationCongeExceptionnel
@@ -1004,6 +1022,13 @@ export default function EmployeeDetailPage() {
                                 <MapPin className="w-4 h-4 text-slate-400 shrink-0" /><span>{details.zone}</span>
                             </div>
                         )}
+                        {
+                            details.departement && (
+                                <div className="flex items-center gap-2.5 text-sm text-slate-600">
+                                    <Building2 className="w-4 h-4 text-slate-400 shrink-0" /><span>{details.departement}</span>
+                                </div>
+                            )
+                        }
                         {details.cycle && (
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2.5 text-sm text-slate-600">

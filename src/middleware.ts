@@ -34,7 +34,7 @@ export default auth(async (req) => {
       // console.log(process.env.NEXT_PUBLIC_API_URL);
 
       if (!domainUrl) {
-        console.log("DOMAIN_URL is not defined in the environment variables");
+        // console.log("DOMAIN_URL is not defined in the environment variables");
         throw new Error(
           "DOMAIN_URL is not defined in the environment variables",
         );

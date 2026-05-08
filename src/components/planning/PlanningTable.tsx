@@ -1,7 +1,6 @@
-// components/planning/PlanningTable.tsx
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, Dispatch, SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
 import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -38,7 +37,6 @@ const ANNOT_TYPES = [
     { code: 'Rc', label: 'Récupération', Icon: RefreshCw, color: '#6d28d9', light: '#ede9fe', border: '#ddd6fe' },
     { code: 'C', label: 'Congé', Icon: Palmtree, color: '#b45309', light: '#ffedd5', border: '#fde68a' },
     { code: 'Ce', label: 'Congé exceptionnel', Icon: Sparkles, color: '#be185d', light: '#fce7f3', border: '#fbcfe8' },
-    // no JF (Géré automatiquement)
 ]
 
 const ANNOT_LABELS: Record<string, string> = Object.fromEntries(ANNOT_TYPES.map(a => [a.code, a.label]))
@@ -83,7 +81,8 @@ interface HistoryEntry {
     modifie_le: string
 }
 
-// ─── EmployeeInfoTooltip ─────────────────────────────────────
+// ─── Tooltips et Composants (identiques à avant) ──────────────
+
 function EmployeeInfoTooltip({ visible, employee, posX, posY }: any) {
     if (!visible) return null
     const getCycleLabel = (cycle: any): string => {
@@ -119,9 +118,14 @@ function EmployeeInfoTooltip({ visible, employee, posX, posY }: any) {
                             <span className="text-slate-400">Poste</span><span className="text-slate-200 font-medium">{employee.poste}</span>
                         </div>
                     )}
-                    {employee.zone && (
+                    {employee.zoneEmployes && (
                         <div className="flex items-center justify-between">
-                            <span className="text-slate-400">Zone</span><span className="text-slate-200 font-medium">{employee.zone}</span>
+                            <span className="text-slate-400">Zone</span><span className="text-slate-200 font-medium">{employee.zoneEmployes.map((ze: any) => ze.zone?.name).join(', ')}</span>
+                        </div>
+                    )}
+                    {employee.departmenet && (
+                        <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Département</span><span className="text-slate-200 font-medium">{employee.departmenet.name}</span>
                         </div>
                     )}
                     <div className="flex items-center justify-between">
@@ -133,7 +137,6 @@ function EmployeeInfoTooltip({ visible, employee, posX, posY }: any) {
     )
 }
 
-// ─── StatutBadge ─────────────────────────────────────────────
 function StatutBadge({ code }: { code: string | null | undefined }) {
     if (!code) return <span className="text-slate-500 italic text-[10px]">—</span>
     const colors = CELL_COLORS[code]
@@ -145,7 +148,6 @@ function StatutBadge({ code }: { code: string | null | undefined }) {
     )
 }
 
-// ─── HistoryTooltip ───────────────────────────────────────────
 interface TooltipState { visible: boolean; history: HistoryEntry[]; statut: string; statut_original: string | null; date: string; posX: number; posY: number }
 function HistoryTooltip({ state }: { state: TooltipState }) {
     if (!state.visible) return null
@@ -200,7 +202,6 @@ function HistoryTooltip({ state }: { state: TooltipState }) {
     )
 }
 
-// ─── AnnotModal ───────────────────────────────────────────────
 interface AnnotModalProps {
     open: boolean;
     onOpenChange: (v: boolean) => void;
@@ -210,15 +211,7 @@ interface AnnotModalProps {
     onOptimisticUpdate: (updates: any) => void;
     onSuccess: () => void;
     onAfterSave?: () => void;
-    permissions: {
-        mission: boolean;
-        justified: boolean;
-        maladie: boolean;
-        recuperation: boolean;
-        conge: boolean;
-        congeExceptionnel: boolean;
-        updatePlanning: boolean;
-    }
+    permissions: any;
 }
 
 function AnnotModal({ open, onOpenChange, cells, currentCode, currentStatut, onOptimisticUpdate, onSuccess, onAfterSave, permissions }: AnnotModalProps) {
@@ -259,6 +252,9 @@ function AnnotModal({ open, onOpenChange, cells, currentCode, currentStatut, onO
         if (code === 'Rc') return permissions.recuperation;
         if (code === 'C') return permissions.conge;
         if (code === 'Ce') return permissions.congeExceptionnel;
+        if (code === 'P') return permissions.present;
+        if (code === 'A') return permissions.absent;
+        if (code === 'R') return permissions.rest;
         return true;
     }
 
@@ -275,7 +271,7 @@ function AnnotModal({ open, onOpenChange, cells, currentCode, currentStatut, onO
                         <div className="grid grid-cols-3 gap-2">
                             {ANNOT_BASE.map(({ code, label, Icon, active, rest }) => {
                                 const isOn = base === code && !annot
-                                const hasPerm = permissions.updatePlanning;
+                                const hasPerm = permissions.updatePlanning && ((code === 'A' && permissions.absent) || (code === 'P' && permissions.present) || (code === 'R' && permissions.rest));
                                 return (
                                     <button
                                         key={code}
@@ -336,7 +332,6 @@ function AnnotModal({ open, onOpenChange, cells, currentCode, currentStatut, onO
     )
 }
 
-// ─── StatsCell ────────────────────────────────────────────────
 function StatsCell({ stats }: { stats: EmpStats }) {
     return (
         <div className="flex flex-wrap items-center gap-0.5 justify-center py-0.5">
@@ -372,8 +367,6 @@ function StatsCell({ stats }: { stats: EmpStats }) {
     )
 }
 
-// ─── Helpers ─────────────────────────────────────────────────
-
 function getCycleLabel(cycle: any): string {
     if (!cycle) return '—'
     if (cycle.type === 'weekly') {
@@ -396,7 +389,7 @@ const EMPTY_STATS: EmpStats = {
     absences_annotees: 0, repos: 0, jours_feries: 0, presences_supplementaires: 0, total: 0,
 }
 
-// ─── Props ────────────────────────────────────────────────────
+// ─── NOUVEAUX PROPS ───────────────────────────────────────────
 
 interface PlanningTableProps {
     employees: any[]
@@ -407,6 +400,9 @@ interface PlanningTableProps {
     onSelectMat: (mat: string | null) => void
     workspaceId: string
     onUpdate: () => void
+    // Ajouté pour remonter l'état des checkbox au parent
+    selectedEmployees: Set<string>
+    onSelectEmployees: Dispatch<SetStateAction<Set<string>>>
 }
 
 // ─── PlanningTable ────────────────────────────────────────────
@@ -414,6 +410,7 @@ interface PlanningTableProps {
 export function PlanningTable({
     employees, planningData, onPlanningDataChange, dates,
     selectedMat, onSelectMat, workspaceId, onUpdate,
+    selectedEmployees, onSelectEmployees,
 }: PlanningTableProps) {
     const router = useRouter()
 
@@ -433,7 +430,7 @@ export function PlanningTable({
     const goToLastPage = useCallback(() => { setPage(totalPages - 1) }, [totalPages])
 
     // ── Sélection ─────────────────────────────────────────────
-    const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set())
+    // selectedEmployees n'est plus un état local mais géré par props
     const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set())
     const [lastClickedCell, setLastClickedCell] = useState<string | null>(null)
 
@@ -446,54 +443,64 @@ export function PlanningTable({
     // permission
     const { session } = useSession();
 
+    const hasPermissionAddAnnotationPresent = useMemo(() => (
+        session?.user?.is_admin ||
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_present"))
+    ), [session]);
+
+    const hasPermissionAddAnnotationAbsent = useMemo(() => (
+        session?.user?.is_admin ||
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_absent"))
+    ), [session]);
+
+    const hasPermissionAddAnnotationRest = useMemo(() => (
+        session?.user?.is_admin ||
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_rest"))
+    ), [session]);
+
     const hasPermissionAddAnnotationMission = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_mission")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_mission"))
     ), [session]);
 
     const hasPermissionAddAnnotationJustified = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_justified")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_justified"))
     ), [session]);
 
     const hasPermissionAddAnnotationMaladie = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_maladie")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_maladie"))
     ), [session]);
 
     const hasPermissionAddAnnotationRecuperation = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_recuperation")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_recuperation"))
     ), [session]);
 
     const hasPermissionAddAnnotationConge = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_conge")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_conge"))
     ), [session]);
 
     const hasPermissionAddAnnotationCongeExceptionnel = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "add_annotation_conge_exceptionnel")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_annotation_conge_exceptionnel"))
     ), [session]);
 
     const hasPermissionUpdateCycle = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "update_cycle")
+        session?.user?.permissions.some((p: string[]) => p.includes("update_cycle"))
     ), [session]);
 
     const hasPermissionViewCycle = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "view_cycle")
+        session?.user?.permissions.some((p: string[]) => p.includes("view_cycle"))
     ), [session]);
 
     const hasPermissionUpdatePlanning = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "update_planning")
-    ), [session]);
-
-    const hasPermissionViewPlanning = useMemo(() => (
-        session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "view_planning")
+        session?.user?.permissions.some((p: string[]) => p.includes("update_planning"))
     ), [session]);
 
     const firstSelectedEmp = employees.find(e => selectedEmployees.has(e.matricule))
@@ -560,7 +567,6 @@ export function PlanningTable({
     }, [planningData, onPlanningDataChange])
 
     // ── Data helpers ──────────────────────────────────────────
-
     const getDisplayCode = (matricule: string, date: string): string => {
         const empData = planningData[matricule]
         if (!empData) return ''
@@ -587,22 +593,20 @@ export function PlanningTable({
     // ── Sélection employés ────────────────────────────────────
     const toggleEmployee = (matricule: string, e: React.MouseEvent) => {
         e.stopPropagation()
-        setSelectedEmployees(prev => {
+        onSelectEmployees(prev => {
             const next = new Set(prev)
             next.has(matricule) ? next.delete(matricule) : next.add(matricule)
             return next
         })
         onSelectMat(matricule)
     }
-    const clearEmployeeSelection = () => { setSelectedEmployees(new Set()); onSelectMat(null) }
+    const clearEmployeeSelection = () => { onSelectEmployees(new Set()); onSelectMat(null) }
 
     // ── Sélection cellules ────────────────────────────────────
     const allCellKeys = pagedEmployees.flatMap(emp => dates.map(date => `${emp.matricule}__${date}`))
 
     const handleCellClick = (matricule: string, date: string, e: React.MouseEvent) => {
         e.stopPropagation()
-
-        // 🛡️ Vérification de la permission
         if (!hasPermissionUpdatePlanning) {
             toast.error("Vous n'avez pas la permission de modifier le planning.", { position: 'bottom-center' })
             return
@@ -724,7 +728,7 @@ export function PlanningTable({
             <div className="text-center py-16 border border-dashed border-slate-200 rounded-2xl bg-white">
                 <Calendar className="h-10 w-10 mx-auto text-slate-300 mb-3" />
                 <h3 className="text-sm font-semibold text-slate-600">Aucune donnée</h3>
-                <p className="text-xs text-slate-400 mt-1">Importez un fichier Excel pour commencer</p>
+                <p className="text-xs text-slate-400 mt-1">Modifiez vos filtres ou la période</p>
             </div>
         )
     }
@@ -775,6 +779,7 @@ export function PlanningTable({
                                                 </div>
                                                 <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.prenom} {emp.nom}</div>
                                                 <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.poste}</div>
+                                                <div className="text-[11px] text-slate-500 truncate max-w-[130px]">{emp.departmenet?.name}</div>
                                                 {(!hasPermissionViewCycle) ? null : <div className="text-[10px] text-slate-400 font-mono">{getCycleLabel(emp.cycles)}</div>}
                                             </div>
                                             <button onClick={e => { e.stopPropagation(); router.push(`/workspaces/${workspaceId}/employees/${emp.id}`) }} className="w-7 flex items-center justify-center shrink-0 text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors border-l border-slate-100" title="Voir le détail">
@@ -784,7 +789,7 @@ export function PlanningTable({
                                     </TableCell>
 
                                     <TableCell className={cn('sticky left-[240px] z-10 text-center p-1 w-[70px]', isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white')} onMouseEnter={(e) => showEmployeeTooltip(e, emp)} onMouseLeave={hideTooltip}>
-                                        <ZoneColumn zone={emp.zone} />
+                                        <ZoneColumn zone={emp.zoneEmployes.map((ze: any) => ze.zone?.name).join(', ')} />
                                     </TableCell>
 
                                     <TableCell className={cn('sticky left-[310px] z-10 p-1 w-[140px]', isEmpSel ? 'bg-slate-900/[0.04]' : 'bg-white')}>
@@ -897,6 +902,9 @@ export function PlanningTable({
                 onSuccess={clearCellSelection}
                 onAfterSave={handleAfterSave}
                 permissions={{
+                    present: hasPermissionAddAnnotationPresent,
+                    absent: hasPermissionAddAnnotationAbsent,
+                    rest: hasPermissionAddAnnotationRest,
                     mission: hasPermissionAddAnnotationMission,
                     justified: hasPermissionAddAnnotationJustified,
                     maladie: hasPermissionAddAnnotationMaladie,
@@ -909,8 +917,6 @@ export function PlanningTable({
         </>
     )
 }
-
-// ─── recalculerStats ─────────────────────────────────────────
 
 function recalculerStats(empData: any): EmpStats {
     let presents = 0, absences = 0, absences_annotees = 0, repos = 0, jours_feries = 0

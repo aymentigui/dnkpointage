@@ -134,10 +134,12 @@ export default function EmployeesPage() {
 
     // ── Filtres backend ───────────────────────────────────────
     const [presenceFilter, setPresenceFilter] = useState('all')
+    const [activeFilter, setActiveFilter] = useState('true') // Par défaut "Actif"
 
     // ── Filtres frontend ──────────────────────────────────────
     const [searchText, setSearchText] = useState('')
     const [posteSearch, setPosteSearch] = useState('')
+    const [departmentSearch, setDepartmentSearch] = useState('') // NOUVEAU
     const [zoneSearch, setZoneSearch] = useState('')
     const [zoneExact, setZoneExact] = useState(false)
     const [cycleType, setCycleType] = useState('all')
@@ -153,28 +155,29 @@ export default function EmployeesPage() {
 
     const hasPermissionDeleteEmployees = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "delete_employe")
+        session?.user?.permissions.some((p: string[]) => p.includes("delete_employe"))
     ), [session]);
 
     const hasPermissionUpdateEmployees = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "update_employe")
+        session?.user?.permissions.some((p: string[]) => p.includes("update_employe"))
     ), [session]);
 
     const hasPermissionCreateEmployees = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "create_employe")
+        session?.user?.permissions.some((p: string[]) => p.includes("add_employe"))
     ), [session]);
 
     const hasPermissionExportEmployees = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "export_employe")
+        session?.user?.permissions.some((p: string[]) => p.includes("export_employe"))
     ), [session]);
 
     const hasPermissionDetectCycles = useMemo(() => (
         session?.user?.is_admin ||
-        session?.user?.permissions.some((p: string) => p === "detect_cycles")
+        session?.user?.permissions.some((p: string[]) => p.includes("detect_cycles"))
     ), [session]);
+
     // ─────────────────────────────────────────────────────────
     // Load
     // ─────────────────────────────────────────────────────────
@@ -182,14 +185,14 @@ export default function EmployeesPage() {
     const loadEmployees = useCallback(async () => {
         setLoading(true)
         try {
-            const p: any = { workspace_id: workspaceId }
+            const p: any = { workspace_id: workspaceId, active: activeFilter }
             if (presenceFilter !== 'all') p.presence = presenceFilter
             const { data } = await employeesApi.getAll(p)
             setEmployees(data.data || [])
             setSelectedIds(new Set())
         } catch { toast.error('Erreur lors du chargement') }
         finally { setLoading(false) }
-    }, [workspaceId, presenceFilter])
+    }, [workspaceId, presenceFilter, activeFilter]) // Ajout de activeFilter ici pour refresh serveur
 
     useEffect(() => { loadEmployees() }, [loadEmployees])
 
@@ -201,14 +204,36 @@ export default function EmployeesPage() {
         const sT = parseTokens(searchText)
         const pT = parseTokens(posteSearch)
         const zT = parseTokens(zoneSearch)
+        const dT = parseTokens(departmentSearch)
+
         return employees.filter(emp => {
+            // Text search (Matricule, nom, prenom)
             if (sT.length > 0 && !matchesAny(emp.matricule, sT) && !matchesAny(emp.nom, sT) && !matchesAny(emp.prenom, sT)) return false
+
+            // Poste
             if (pT.length > 0 && !matchesAny(emp.poste, pT)) return false
-            if (zT.length > 0 && !(zoneExact ? matchesExact(emp.zone, zT) : matchesAny(emp.zone, zT))) return false
+
+            // NOUVEAU: Département
+            const depName = emp.departmenet?.name || ''
+            if (dT.length > 0 && !matchesAny(depName, dT)) return false
+
+            // NOUVEAU: Zone (Table de liaison)
+            if (zT.length > 0) {
+                if (zoneExact) {
+                    const hasExact = emp.zoneEmployes?.some((ze: any) => matchesExact(ze.zone?.name, zT))
+                    if (!hasExact) return false
+                } else {
+                    const allZonesStr = emp.zoneEmployes?.map((ze: any) => ze.zone?.name).join(' ') || ''
+                    if (!matchesAny(allZonesStr, zT)) return false
+                }
+            }
+
+            // Cycle
             if (cycleType !== 'all' && (emp.cycles?.type ?? 'unknown') !== cycleType) return false
+
             return true
         })
-    }, [employees, searchText, posteSearch, zoneSearch, zoneExact, cycleType])
+    }, [employees, searchText, posteSearch, departmentSearch, zoneSearch, zoneExact, cycleType])
 
     useMemo(() => { setPage(0); setSelectedIds(new Set()) }, [filteredEmployees])
 
@@ -299,12 +324,17 @@ export default function EmployeesPage() {
     }
 
     const clearFilters = () => {
-        setSearchText(''); setPosteSearch(''); setZoneSearch('')
-        setZoneExact(false); setCycleType('all'); setPresenceFilter('all')
+        setSearchText(''); setPosteSearch(''); setZoneSearch(''); setDepartmentSearch('');
+        setZoneExact(false); setCycleType('all'); setPresenceFilter('all'); setActiveFilter('true');
     }
 
-    const hasActiveFilters = !!(searchText || posteSearch || zoneSearch || cycleType !== 'all' || presenceFilter !== 'all')
-    const activeFilterCount = [searchText, posteSearch, zoneSearch, cycleType !== 'all' ? '1' : '', presenceFilter !== 'all' ? '1' : ''].filter(Boolean).length
+    const hasActiveFilters = !!(searchText || posteSearch || zoneSearch || departmentSearch || cycleType !== 'all' || presenceFilter !== 'all' || activeFilter !== 'true')
+    const activeFilterCount = [
+        searchText, posteSearch, zoneSearch, departmentSearch,
+        cycleType !== 'all' ? '1' : '',
+        presenceFilter !== 'all' ? '1' : '',
+        activeFilter !== 'true' ? '1' : ''
+    ].filter(Boolean).length
 
     // ─────────────────────────────────────────────────────────
     // Render
@@ -371,7 +401,7 @@ export default function EmployeesPage() {
 
                     {filtersExpanded && (
                         <div className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-100">
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
 
                                 {/* Matricule / Nom / Prénom */}
                                 <div className="space-y-1.5">
@@ -397,9 +427,20 @@ export default function EmployeesPage() {
                                     <p className="text-[10px] text-slate-400">Virgule = OR</p>
                                 </div>
 
+                                {/* Département */}
+                                <div className="space-y-1.5">
+                                    <Label className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Département</Label>
+                                    <div className="relative">
+                                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                                        <Input placeholder="IT, RH…" value={departmentSearch}
+                                            onChange={e => setDepartmentSearch(e.target.value)} className="pl-8 h-8 text-sm" />
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">Virgule = OR</p>
+                                </div>
+
                                 {/* Zone */}
                                 <div className="space-y-1.5">
-                                    <Label className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Zone</Label>
+                                    <Label className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Zone(s)</Label>
                                     <div className="relative">
                                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                                         <Input placeholder="zone1, zone2…" value={zoneSearch}
@@ -410,6 +451,20 @@ export default function EmployeesPage() {
                                             onCheckedChange={v => setZoneExact(!!v)} className="h-3 w-3" />
                                         <span className="text-[10px] text-slate-400 select-none">Exacte</span>
                                     </label>
+                                </div>
+
+                                {/* Statut */}
+                                <div className="space-y-1.5">
+                                    <Label className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Statut</Label>
+                                    <Select value={activeFilter} onValueChange={setActiveFilter}>
+                                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Tous les statuts</SelectItem>
+                                            <SelectItem value="true">🟢 Actifs</SelectItem>
+                                            <SelectItem value="false">🔴 Inactifs</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-[10px] text-slate-400">Requête serveur</p>
                                 </div>
 
                                 {/* Type cycle */}
@@ -424,7 +479,7 @@ export default function EmployeesPage() {
                                 </div>
 
                                 {/* Présence */}
-                                <div className="space-y-1.5">
+                                <div className="space-y-1.5 lg:col-span-2">
                                     <Label className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Présence</Label>
                                     <Select value={presenceFilter} onValueChange={setPresenceFilter}>
                                         <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
@@ -493,7 +548,8 @@ export default function EmployeesPage() {
                                                 }
                                             </button>
                                         </th>
-                                        {['Matricule', 'Nom complet', 'Poste', 'Zone', 'Cycle', 'Pointages', 'Actions'].map(h => (
+                                        {/* Modifié ici : Ajout Département et Statut */}
+                                        {['Matricule', 'Nom complet', 'Poste', 'Département', 'Zone(s)', 'Statut', 'Cycle', 'Pointages', 'Actions'].map(h => (
                                             <th key={h} className={cn(
                                                 'px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-widest',
                                                 h === 'Actions' || h === 'Pointages' ? 'text-center' : 'text-left'
@@ -504,7 +560,7 @@ export default function EmployeesPage() {
                                 <tbody className="divide-y divide-slate-50">
                                     {pagedEmployees.length === 0 ? (
                                         <tr>
-                                            <td colSpan={8} className="text-center py-16 text-slate-400 text-sm">
+                                            <td colSpan={10} className="text-center py-16 text-slate-400 text-sm">
                                                 Aucun employé correspondant
                                             </td>
                                         </tr>
@@ -535,8 +591,30 @@ export default function EmployeesPage() {
                                                 </td>
                                                 {/* Poste */}
                                                 <td className="px-3 py-3 text-sm text-slate-500">{emp.poste ?? '—'}</td>
-                                                {/* Zone */}
-                                                <td className="px-3 py-3 text-sm text-slate-500">{emp.zone ?? '—'}</td>
+
+                                                {/* NOUVEAU: Département */}
+                                                <td className="px-3 py-3 text-sm text-slate-500">{emp.departmenet?.name ?? '—'}</td>
+
+                                                {/* NOUVEAU: Zone (Map via zoneEmployes) */}
+                                                <td className="px-3 py-3 text-sm text-slate-500">
+                                                    {emp.zoneEmployes && emp.zoneEmployes.length > 0
+                                                        ? emp.zoneEmployes.map((ze: any) => ze.zone?.name).join(', ')
+                                                        : '—'}
+                                                </td>
+
+                                                {/* NOUVEAU: Statut */}
+                                                <td className="px-3 py-3">
+                                                    {emp.active ? (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-100">
+                                                            Actif
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-rose-50 text-rose-600 border border-rose-100">
+                                                            Inactif
+                                                        </span>
+                                                    )}
+                                                </td>
+
                                                 {/* Cycle */}
                                                 <td className="px-3 py-3">
                                                     {emp.cycles && emp.cycles.type !== 'unknown' ? (

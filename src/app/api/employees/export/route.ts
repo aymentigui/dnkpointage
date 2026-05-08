@@ -3,7 +3,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as XLSX from "xlsx";
-import { verifySession } from "@/actions/permissions";
+import {
+  verifySession,
+  withAuthorizationPermission,
+} from "@/actions/permissions";
 
 // Change from GET to POST
 export async function POST(request: NextRequest) {
@@ -15,6 +18,21 @@ export async function POST(request: NextRequest) {
         { status: 401 },
       );
     }
+
+    const hasPermissionAdd = await withAuthorizationPermission([
+      "view_employe",
+    ]);
+
+    if (
+      hasPermissionAdd.status != 200 ||
+      !hasPermissionAdd.data.hasPermission
+    ) {
+      return NextResponse.json(
+        { message: "Vous n'avez pas la permission de voir les employés" },
+        { status: 403 },
+      );
+    }
+
     const body = await request.json();
     const { ids, workspaceId } = body;
 
@@ -29,11 +47,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Aucun ID fourni" }, { status: 400 });
     }
 
-    // ── Fetch employés ────────────────────────────────────────
+    // ── Fetch employés avec les nouvelles relations ───────────
     const employees = await prisma.employee.findMany({
       where,
       include: {
         cycles: true,
+        departmenet: true, // NOUVEAU: Inclure le département
+        zoneEmployes: {
+          // NOUVEAU: Inclure les zones via la table de liaison
+          include: {
+            zone: true,
+          },
+        },
         _count: {
           select: {
             pointages: true,
@@ -76,7 +101,9 @@ export async function POST(request: NextRequest) {
       "Nom",
       "Prénom",
       "Poste",
-      "Zone",
+      "Département", // Ajouté
+      "Zone(s)", // Modifié
+      "Statut", // Ajouté (Actif/Inactif)
       "Cycle",
       "Type cycle",
       "Manuel",
@@ -84,18 +111,28 @@ export async function POST(request: NextRequest) {
       "Nb annotations",
     ];
 
-    const rows = employees.map((emp) => [
-      emp.matricule,
-      emp.nom ?? "",
-      emp.prenom ?? "",
-      emp.poste ?? "",
-      emp.zone ?? "",
-      getCycleLabel(emp.cycles),
-      emp.cycles?.type ?? "—",
-      emp.cycles?.est_manuel ? "Oui" : "Non",
-      emp._count.pointages,
-      emp._count.annotations,
-    ]);
+    const rows = employees.map((emp) => {
+      // Extraire le nom des zones et les joindre avec une virgule s'il y en a plusieurs
+      const zonesString =
+        emp.zoneEmployes && emp.zoneEmployes.length > 0
+          ? emp.zoneEmployes.map((ze) => ze.zone.name).join(", ")
+          : "—";
+
+      return [
+        emp.matricule,
+        emp.nom ?? "",
+        emp.prenom ?? "",
+        emp.poste ?? "",
+        emp.departmenet?.name ?? "—", // Extraction du nom du département
+        zonesString, // Extraction des zones
+        emp.active ? "Actif" : "Inactif", // Affichage du statut
+        getCycleLabel(emp.cycles),
+        emp.cycles?.type ?? "—",
+        emp.cycles?.est_manuel ? "Oui" : "Non",
+        emp._count.pointages,
+        emp._count.annotations,
+      ];
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -105,7 +142,9 @@ export async function POST(request: NextRequest) {
       { wch: 18 }, // Nom
       { wch: 18 }, // Prénom
       { wch: 20 }, // Poste
-      { wch: 14 }, // Zone
+      { wch: 20 }, // Département (Nouveau)
+      { wch: 25 }, // Zone(s) (Ajusté pour plusieurs zones)
+      { wch: 12 }, // Statut (Nouveau)
       { wch: 22 }, // Cycle
       { wch: 12 }, // Type cycle
       { wch: 8 }, // Manuel

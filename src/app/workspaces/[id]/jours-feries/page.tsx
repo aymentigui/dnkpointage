@@ -1,7 +1,7 @@
 // app/jours-feries/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -75,6 +75,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { joursFeriesApi } from "@/lib/api";
 import toast from "react-hot-toast";
 import { AppShell } from "@/components/layout/AppShell";
+import { useSession } from "@/hooks/use-session";
 
 // Types
 interface JourFerie {
@@ -116,6 +117,25 @@ export default function JoursFeriesPage() {
     const [editingItem, setEditingItem] = useState<JourFerie | null>(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+
+    // permission
+    const { session } = useSession();
+
+    const hasPermissionAddJourFerie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("add_jour_ferie"))
+    ), [session]);
+
+    const hasPermissionUpdateJourFerie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("update_jour_ferie"))
+    ), [session]);
+
+    const hasPermissionDeleteJourFerie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("delete_jour_ferie"))
+    ), [session]);
+
+    const hasPermissionViewJourFerie = useMemo(() => (
+        session?.user?.is_admin || session?.user?.permissions.some((p: string[]) => p.includes("view_jour_ferie"))
+    ), [session]);
 
     // Form state
     const [formData, setFormData] = useState<FormData>({
@@ -284,10 +304,12 @@ export default function JoursFeriesPage() {
                             <CardTitle className="text-2xl font-bold">
                                 Gestion des Jours Fériés
                             </CardTitle>
-                            <Button onClick={handleAddNew} className="gap-2">
-                                <Plus className="h-4 w-4" />
-                                Ajouter un jour férié
-                            </Button>
+                            {hasPermissionAddJourFerie && (
+                                <Button onClick={handleAddNew} className="gap-2">
+                                    <Plus className="h-4 w-4" />
+                                    Ajouter un jour férié
+                                </Button>
+                            )}
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -374,23 +396,27 @@ export default function JoursFeriesPage() {
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-2">
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => handleEdit(item)}
-                                                        >
-                                                            <Edit className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => {
-                                                                setItemToDelete(item.id);
-                                                                setDeleteDialogOpen(true);
-                                                            }}
-                                                        >
-                                                            <Trash2 className="h-4 w-4 text-red-500" />
-                                                        </Button>
+                                                        {hasPermissionUpdateJourFerie && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => handleEdit(item)}
+                                                            >
+                                                                <Edit className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                        {hasPermissionDeleteJourFerie && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    setItemToDelete(item.id);
+                                                                    setDeleteDialogOpen(true);
+                                                                }}
+                                                            >
+                                                                <Trash2 className="h-4 w-4 text-red-500" />
+                                                            </Button>
+                                                        )}
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
